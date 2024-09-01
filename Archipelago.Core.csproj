@@ -2,12 +2,22 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Version>0.0.5</Version>
+    <Authors>ArsonAssassin</Authors>
+    <Product>Archipelago.Core</Product>
+    <PackageId>Archipelago.Core</PackageId>
+    <Description>A class library for interfacing between various emulators and Archipelago Multiworld Randomiser.</Description>
+    <RepositoryUrl>https://github.com/ArsonAssassin/Archipelago.Core</RepositoryUrl>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
-
+  <PropertyGroup>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Archipelago.MultiClient.Net" Version="6.2.0" />
+    <PackageReference Include="Archipelago.MultiClient.Net" Version="6.3.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
