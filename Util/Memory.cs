@@ -26,20 +26,20 @@ namespace Archipelago.Core.Util
         [DllImport("user32.dll", SetLastError = true)]
         private static extern int GetWindowThreadProcessId(IntPtr hWnd, out int processID);
         [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool ReadProcessMemory(IntPtr processH, uint lpBaseAddress, byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesRead);
+        private static extern bool ReadProcessMemory(IntPtr processH, ulong lpBaseAddress, byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesRead);
 
         [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool WriteProcessMemory(IntPtr processH, uint lpBaseAddress, byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesWritten);
+        private static extern bool WriteProcessMemory(IntPtr processH, ulong lpBaseAddress, byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesWritten);
         [DllImport("kernel32.dll", SetLastError = true)]
         internal static extern bool CloseHandle(IntPtr processH);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
 
         [DllImport("kernel32.dll", SetLastError = true, CallingConvention = CallingConvention.ThisCall)]
-        public static extern bool VirtualProtect(IntPtr processH, uint lpAddress, int lpBuffer, uint flNewProtect, out uint lpflOldProtect);
+        public static extern bool VirtualProtect(IntPtr processH, ulong lpAddress, int lpBuffer, uint flNewProtect, out uint lpflOldProtect);
 
         [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool VirtualProtectEx(IntPtr processH, uint lpAddress, int lpBuffer, uint flNewProtect, out uint lpflOldProtect);
+        public static extern bool VirtualProtectEx(IntPtr processH, ulong lpAddress, int lpBuffer, uint flNewProtect, out uint lpflOldProtect);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern uint GetLastError();
@@ -94,74 +94,93 @@ namespace Archipelago.Core.Util
                 return pid;
             }
         }
+        public static int XENIA_PROCESSID
+        {
+            get
+            {
+                var pid = GetProcessID("Xenia");
+                return pid;
+            }
+        }
         public static int CurrentProcId { get; set; }
         public static IntPtr GetProcessH(int proc)
         {
             return OpenProcess(PROCESS_VM_OPERATION | PROCESS_SUSPEND_RESUME | PROCESS_VM_READ | PROCESS_VM_WRITE, false, proc);
         }
        
-        internal static string GetSystemMessage(uint errorCode)
+        internal static string GetSystemMessage(ulong errorCode)
         {
             return Marshal.PtrToStringAnsi(IntPtr.Zero);
         }
         #endregion
-        public static byte ReadByte(uint address)
+        public static byte ReadByte(ulong address)
         {
             byte[] dataBuffer = new byte[1];
             ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
             return dataBuffer[0];
         }
 
-        public static byte[] ReadByteArray(uint address, int numBytes)
+        public static byte[] ReadByteArray(ulong address, int numBytes)
         {
             byte[] dataBuffer = new byte[numBytes];
             ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
             return dataBuffer;
         }
 
-        public static ushort ReadUShort(uint address)
+        public static ushort ReadUShort(ulong address)
         {
             byte[] dataBuffer = new byte[2];
             ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
             return BitConverter.ToUInt16(dataBuffer, 0);
         }
 
-        public static short ReadShort(uint address)
+        public static short ReadShort(ulong address)
         {
             byte[] dataBuffer = new byte[2];
             ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
             return BitConverter.ToInt16(dataBuffer, 0);
         }
 
-        public static uint ReadUInt(uint address)
+        public static uint ReadUInt(ulong address)
         {
             byte[] dataBuffer = new byte[4];
             ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
             return BitConverter.ToUInt32(dataBuffer, 0);
         }
 
-        public static int ReadInt(uint address)
+        public static int ReadInt(ulong address)
         {
             byte[] dataBuffer = new byte[4];
             ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
             return BitConverter.ToInt32(dataBuffer, 0);
         }
+        public static int ReadBigEndianInt(ulong address)
+        {
+            byte[] dataBuffer = new byte[4];
+            ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
 
-        public static float ReadFloat(uint address)
+            if (BitConverter.IsLittleEndian)
+            {
+                Array.Reverse(dataBuffer);
+            }
+
+            return BitConverter.ToInt32(dataBuffer, 0);
+        }
+        public static float ReadFloat(ulong address)
         {
             byte[] dataBuffer = new byte[8];
             ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
             return BitConverter.ToSingle(dataBuffer, 0);
         }
 
-        public static double ReadDouble(uint address)
+        public static double ReadDouble(ulong address)
         {
             byte[] dataBuffer = new byte[8];
             ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
             return BitConverter.ToDouble(dataBuffer, 0);
         }
 
-        public static string ReadString(uint address, int length)
+        public static string ReadString(ulong address, int length)
         {
             byte[] dataBuffer = new byte[length];
             ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, length, out _);
@@ -170,23 +189,23 @@ namespace Archipelago.Core.Util
             return output;
         }
 
-        public static bool Write(uint address, byte[] value)
+        public static bool Write(ulong address, byte[] value)
         {
             return WriteProcessMemory(GetProcessH(CurrentProcId), address, value, value.Length, out _);
         }
 
-        public static bool WriteString(uint address, string stringToWrite)
+        public static bool WriteString(ulong address, string stringToWrite)
         {
             byte[] dataBuffer = Encoding.GetEncoding(10000).GetBytes(stringToWrite);
             return WriteProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
         }
 
-        public static bool WriteByte(uint address, byte value)
+        public static bool WriteByte(ulong address, byte value)
         {
             return Write(address, [value]);
         }
 
-        public static void WriteByteArray(uint address, byte[] byteArray)
+        public static void WriteByteArray(ulong address, byte[] byteArray)
         {
             bool successful;
             successful = VirtualProtectEx(GetProcessH(CurrentProcId), address, byteArray.Length, PAGE_EXECUTE_READWRITE, out _);
@@ -197,31 +216,31 @@ namespace Archipelago.Core.Util
                 Console.WriteLine(GetLastError() + " - " + GetSystemMessage(GetLastError()));
         }
 
-        public static bool Write(uint address, ushort value)
+        public static bool Write(ulong address, ushort value)
         {
             return Write(address, BitConverter.GetBytes(value));
         }
-        public static bool Write(uint address, int value)
+        public static bool Write(ulong address, int value)
         {
             return Write(address, BitConverter.GetBytes(value));
         }
-        public static bool Write(uint address, short value)
+        public static bool Write(ulong address, short value)
         {
             return Write(address, BitConverter.GetBytes(value));
         }
-        public static bool Write(uint address, uint value)
+        public static bool Write(ulong address, uint value)
         {
             return Write(address, BitConverter.GetBytes(value));
         }
-        public static bool Write(uint address, float value)
+        public static bool Write(ulong address, float value)
         {
             return Write(address, BitConverter.GetBytes(value));
         }
-        public static bool Write(uint address, double value)
+        public static bool Write(ulong address, double value)
         {
             return Write(address, BitConverter.GetBytes(value));
         }
-        public static bool WriteBit(uint address, int bitPosition, bool value)
+        public static bool WriteBit(ulong address, int bitPosition, bool value)
         {
             if (bitPosition < 0 || bitPosition > 7)
             {
