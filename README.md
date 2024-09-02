@@ -34,7 +34,7 @@ gameClient.Connect();
 ```
 var archipelagoClient = new ArchipelagoClient(gameClient);
 ```  
-###Using Memory Functions
+### Using Memory Functions
 ```var money = Memory.ReadInt(0x00000000);
 Memory.WriteString(0x00000000, "Hello World");
 ```  
@@ -54,7 +54,7 @@ Call PopulateLocations after connecting but before logging in:
 archipelagoClient.PopulateLocations(myLocations);
  ```  
 
-Location Object Properties
+## Location Object Properties
 
  - ulong address: The address that changes when the location is completed
  - int addressbit: Which bit of this address is related to this specific location (only used when LocationCheckType == Bit)
