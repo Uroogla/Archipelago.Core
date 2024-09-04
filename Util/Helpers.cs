@@ -58,7 +58,6 @@ namespace Archipelago.Core.Util
             {
                 throw new NotImplementedException("Range checks are not supported yet");
             }
-            Console.WriteLine($"Memory value changed at address {address.ToString("X8")}");
         }
         public static async Task MonitorAddress(uint address, int valueToCheck, LocationCheckCompareType compareType)
         {
@@ -176,7 +175,6 @@ namespace Archipelago.Core.Util
                 currentBitValue = GetBitValue(currentValue, bit);
                 Thread.Sleep(10);
             }
-            Console.WriteLine($"Memory value changed at address {address.ToString("X8")}, bit {bit}");
         }
         private static bool GetBitValue(byte value, int bitIndex)
         {

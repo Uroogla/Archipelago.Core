@@ -94,6 +94,14 @@ namespace Archipelago.Core.Util
                 return pid;
             }
         }
+        public static int DARKSOULS_PROCESSID
+        {
+            get
+            {
+                var pid = GetProcessID("DarkSoulsRemastered");
+                return pid;
+            }
+        }
         public static int XENIA_PROCESSID
         {
             get
@@ -102,12 +110,17 @@ namespace Archipelago.Core.Util
                 return pid;
             }
         }
+        public static int GetProcIdFromExe(string exe)
+        {
+            var pid = GetProcessID(exe);
+            return pid;
+        }
         public static int CurrentProcId { get; set; }
         public static IntPtr GetProcessH(int proc)
         {
             return OpenProcess(PROCESS_VM_OPERATION | PROCESS_SUSPEND_RESUME | PROCESS_VM_READ | PROCESS_VM_WRITE, false, proc);
         }
-       
+
         internal static string GetSystemMessage(ulong errorCode)
         {
             return Marshal.PtrToStringAnsi(IntPtr.Zero);

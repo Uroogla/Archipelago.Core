@@ -2,7 +2,9 @@
 using Archipelago.Core.Util;
 using Archipelago.MultiClient.Net;
 using Archipelago.MultiClient.Net.Enums;
+using Archipelago.MultiClient.Net.MessageLog.Messages;
 using Archipelago.MultiClient.Net.Models;
+using Archipelago.MultiClient.Net.Packets;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -23,6 +25,7 @@ namespace Archipelago.Core
         public event EventHandler<ItemReceivedEventArgs> ItemReceived;
         public event EventHandler<ConnectionChangedEventArgs> Disconnected;
         public event EventHandler<ConnectionChangedEventArgs> Connected;
+        public event EventHandler<MessageReceivedEventArgs> MessageReceived;
         public ArchipelagoSession CurrentSession { get; set; }
         private List<Location> Locations { get; set; }
         private string GameName { get; set; }
@@ -59,10 +62,11 @@ namespace Archipelago.Core
 
         public void Disconnect()
         {
+            CurrentSession.Socket.SocketClosed -= Socket_SocketClosed;
+            CurrentSession.MessageLog.OnMessageReceived -= HandleMessageReceived;
             CurrentSession = null;
             IsConnected = false;
             Disconnected?.Invoke(this, new ConnectionChangedEventArgs(false));
-            CurrentSession.Socket.SocketClosed -= Socket_SocketClosed;
         }
 
         public async Task Login(string playerName, string password = null)
@@ -85,44 +89,91 @@ namespace Archipelago.Core
             }
             var currentSlot = CurrentSession.ConnectionInfo.Slot;
             var slotData = await CurrentSession.DataStorage.GetSlotDataAsync(currentSlot);
-            _options = JsonConvert.DeserializeObject<Dictionary<string, object>>(slotData["options"].ToString());
+            var optionData = slotData["options"];
+            if (optionData != null) {
+                _options = JsonConvert.DeserializeObject<Dictionary<string, object>>(optionData.ToString());
+            }
 
             IsConnected = true;
             LoadGameState();
             AppDomain.CurrentDomain.ProcessExit += (sender, e) => SaveGameState();
             MonitorLocations(Locations);
 
+            CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;         
             Connected?.Invoke(this, new ConnectionChangedEventArgs(true));
-            CurrentSession.Items.ItemReceived += (helper) =>
+            InitItemReceiver();
+            return;
+        }
+        private async void HandleMessageReceived(LogMessage message)
+        {
+            MessageReceived?.Invoke(this, new MessageReceivedEventArgs(message));
+        }
+        public async void SendGoalCompletion()
+        {
+            var update = new StatusUpdatePacket();
+            update.Status = ArchipelagoClientState.ClientGoal;
+            CurrentSession.Socket.SendPacket(update);   
+        }
+
+        public async void InitItemReceiver()
+        {
+            Console.WriteLine("Checking for offline items received");
+            if (IsConnected)
             {
-                Console.WriteLine("Item received");
-                var items = CurrentSession.Items.AllItemsReceived;
-                List<ItemInfo> unhandled = new List<ItemInfo>();
-                foreach (var thing in items)
+                var existingItems = GameState.ReceivedItems;
+                var newItems = CurrentSession.Items.AllItemsReceived;
+                bool newItemFound = false;
+                foreach(var item in newItems)
                 {
-                    //Have received an item of this type before
-                    if (GameState.ReceivedItems.Any(x => thing.ItemId == x.Id) || unhandled.Any(x => x.ItemId == thing.ItemId))
+                    if(existingItems.Any(x => x.Id == item.ItemId))
                     {
-                        //There is a new item of this type that hasnt been received yet
-                        if (items.Count(x => x.ItemId == thing.ItemId) > (GameState.ReceivedItems.Count(ri => ri.Id == thing.ItemId) + unhandled.Count(x => x.ItemId == thing.ItemId)))
-                        {
-                            unhandled.Add(thing);
-                        }
+                        existingItems.Remove(existingItems.FirstOrDefault(x => x.Id == item.ItemId));
                     }
                     else
                     {
-                        //Havent received any of this item yet
+                        newItemFound = true;
+                        break;
+                    }
+                }
+                if (newItemFound)
+                {
+                    ReceiveItems();
+                }
+            }
+
+            CurrentSession.Items.ItemReceived += (helper) =>
+            {
+                Console.WriteLine("Item received");
+                ReceiveItems();
+            };
+        }
+        public async void ReceiveItems()
+        {
+            var items = CurrentSession.Items.AllItemsReceived;
+            List<ItemInfo> unhandled = new List<ItemInfo>();
+            foreach (var thing in items)
+            {
+                //Have received an item of this type before
+                if (GameState.ReceivedItems.Any(x => thing.ItemId == x.Id) || unhandled.Any(x => x.ItemId == thing.ItemId))
+                {
+                    //There is a new item of this type that hasnt been received yet
+                    if (items.Count(x => x.ItemId == thing.ItemId) > (GameState.ReceivedItems.Count(ri => ri.Id == thing.ItemId) + unhandled.Count(x => x.ItemId == thing.ItemId)))
+                    {
                         unhandled.Add(thing);
                     }
                 }
-                foreach (var item in unhandled)
+                else
                 {
-                    var newItem = new Item() { Id = (int)item.ItemId, Quantity = 1, Name = item.ItemName };
-                    ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = newItem });
-                    GameState.ReceivedItems.Add(newItem);
+                    //Havent received any of this item yet
+                    unhandled.Add(thing);
                 }
-            };
-            return;
+            }
+            foreach (var item in unhandled)
+            {
+                var newItem = new Item() { Id = (int)item.ItemId, Quantity = 1, Name = item.ItemName };
+                ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = newItem });
+                GameState.ReceivedItems.Add(newItem);
+            }
         }
         public async void PopulateLocations(List<Location> locations)
         {
@@ -188,10 +239,9 @@ namespace Archipelago.Core
                 Directory.CreateDirectory(Path.GetDirectoryName(filePath));
                 string content = JsonConvert.SerializeObject(GameState);
                 File.WriteAllText(filePath, content);
-
-
             }
         }
+
         private void LoadGameState()
         {
             if (IsConnected)
