@@ -69,8 +69,8 @@ archipelagoClient.PopulateLocations(myLocations);
 The client will trigger the ItemReceived event when an item is received.
 Ensure location tracking setup is done after connecting the Archipelago client but before logging in the user.
 
-To handle all messages, suscribe to ArchipelagoClient.MessageReceived
-To complete a game, call ArchipelagoClient.SendGoalCompletion();
+To handle all messages, suscribe to ArchipelagoClient.MessageReceived  
+To complete a game, call ArchipelagoClient.SendGoalCompletion();  
 
 # Custom Game Client
 If you are working with a game that does not use one of the included emulators, you can access memory of a custom exe by creating an instance of IGameClient.
