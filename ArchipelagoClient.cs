@@ -176,7 +176,7 @@ namespace Archipelago.Core
         }
         public async void PopulateLocations(List<Location> locations)
         {
-            if (!IsConnected)
+            if (!IsConnected || CurrentSession == null)
             {
                 Console.WriteLine("Ensure client is connected before populating locations!");
                 return;
