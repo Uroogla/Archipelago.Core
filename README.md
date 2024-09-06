@@ -48,7 +48,7 @@ archipelagoClient.Login("Player1", "Password");
 To set up location tracking:
 
 Create a collection of Location objects
-Call PopulateLocations after connecting but before logging in:
+Call PopulateLocations after connecting:
 
 ``` 
 archipelagoClient.PopulateLocations(myLocations);
@@ -64,7 +64,35 @@ archipelagoClient.PopulateLocations(myLocations);
  - string CheckValue: The value to compare to determine if the location check is met
  - LocationCheckCompareType CompareType: The comparison type for the location check (supports Match, GreaterThan, LessThan, Range)
 
-## Advanced Features
+## Other Features
 
 The client will trigger the ItemReceived event when an item is received.
 Ensure location tracking setup is done after connecting the Archipelago client but before logging in the user.
+
+To handle all messages, suscribe to ArchipelagoClient.MessageReceived  
+To complete a game, call ArchipelagoClient.SendGoalCompletion();  
+
+# Custom Game Client
+If you are working with a game that does not use one of the included emulators, you can access memory of a custom exe by creating an instance of IGameClient.
+```
+public class MyGameClient : IGameClient
+{
+   public bool IsConnected{get;set;}
+   public int ProcId{get;set;} = Memory.GetProcIdFromExe("myExeName");
+   public MyGameClient(){}
+   public bool Connect()
+   {
+      Console.WriteLine("Connecting");
+      if(ProcId == 0)
+      {
+         Console.WriteLine("Process not running");
+         return false;
+      }
+      else
+      {
+         IsConnected = true;
+         return true;
+      }
+   }
+}
+```
