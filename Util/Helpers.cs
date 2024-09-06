@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -26,155 +27,84 @@ namespace Archipelago.Core.Util
                 return jsonFile;
             }
         }
-        public static async Task MonitorAddress(uint address, LocationCheckCompareType compareType)
-        {
-            var initialValue = Memory.ReadByte(address);
-            var currentValue = initialValue;
-            if (compareType == LocationCheckCompareType.Match)
-            {
-                while (!(initialValue == currentValue))
-                {
-                    currentValue = Memory.ReadByte(address);
-                    Thread.Sleep(1);
-                }
-            }
-            else if (compareType == LocationCheckCompareType.GreaterThan)
-            {
-                while (!(initialValue > currentValue))
-                {
-                    currentValue = Memory.ReadByte(address);
-                    Thread.Sleep(1);
-                }
-            }
-            else if (compareType == LocationCheckCompareType.LessThan)
-            {
-                while (!(initialValue < currentValue))
-                {
-                    currentValue = Memory.ReadByte(address);
-                    Thread.Sleep(1);
-                }
-            }
-            else if (compareType == LocationCheckCompareType.Range)
-            {
-                throw new NotImplementedException("Range checks are not supported yet");
-            }
-        }
-        public static async Task MonitorAddress(uint address, int valueToCheck, LocationCheckCompareType compareType)
-        {
-            var initialValue = Memory.ReadInt(address);
-            var currentValue = initialValue;
-            if (compareType == LocationCheckCompareType.Match)
-            {
-                while (!(currentValue == valueToCheck))
-                {
-                    currentValue = Memory.ReadInt(address);
-                    Thread.Sleep(1);
-                }
-            }
-            else if(compareType == LocationCheckCompareType.GreaterThan)
-            {
-                while (!(currentValue > valueToCheck))
-                {
-                    currentValue = Memory.ReadInt(address);
-                    Thread.Sleep(1);
-                }
-            }
-            else if (compareType == LocationCheckCompareType.LessThan)
-            {
-                while (!(currentValue < valueToCheck))
-                {
-                    currentValue = Memory.ReadInt(address);
-                    Thread.Sleep(1);
-                }
-            }
-            else if (compareType == LocationCheckCompareType.Range)
-            {
-                throw new NotImplementedException("Range checks are not supported yet");
 
-            }
-        }
-        public static async Task MonitorAddress(uint address, byte valueToCheck, LocationCheckCompareType compareType)
+        public static async Task<bool> CheckLocation(Location location)
         {
-            var initialValue = Memory.ReadByte(address);
-            var currentValue = initialValue;
-            if (compareType == LocationCheckCompareType.Match)
+            switch (location.CheckType)
             {
-                while (!(currentValue == valueToCheck))
-                {
-                    currentValue = Memory.ReadByte(address);
-                    Thread.Sleep(1);
-                }
-            }
-            else if (compareType == LocationCheckCompareType.GreaterThan)
-            {
-                while (!(currentValue > valueToCheck))
-                {
-                    currentValue = Memory.ReadByte(address);
-                    Thread.Sleep(1);
-                }
-            }
-            else if (compareType == LocationCheckCompareType.LessThan)
-            {
-                while (!(currentValue < valueToCheck))
-                {
-                    currentValue = Memory.ReadByte(address);
-                    Thread.Sleep(1);
-                }
-            }
-            else if (compareType == LocationCheckCompareType.Range)
-            {
-                throw new NotImplementedException("Range checks are not supported yet");
+                case (LocationCheckType.Bit):
+                    var currentAddressValue = Memory.ReadByte(location.Address);
+                    bool currentBitValue = GetBitValue(currentAddressValue, location.AddressBit);
+                    if (string.IsNullOrWhiteSpace(location.CheckValue))
+                    {
+                        return currentBitValue;
+                    }
+                    else { return !currentBitValue; }
+                    break;
+                case (LocationCheckType.Int):
+                    var currentIntValue = Memory.ReadInt(location.Address);
+                    if (location.CompareType == LocationCheckCompareType.Match)
+                    {
+                        return currentIntValue == Convert.ToByte(location.CheckValue);
 
-            }
-        }
-        public static async Task MonitorAddress(uint address, int length, uint valueToCheck, LocationCheckCompareType compareType)
-        {
-            var initialValue = BitConverter.ToUInt32(Memory.ReadByteArray(address, length));
-            var currentValue = initialValue;
-            if (compareType == LocationCheckCompareType.Match)
-            {
-                while (!(currentValue == valueToCheck))
-                {
-                    currentValue = BitConverter.ToUInt32(Memory.ReadByteArray(address, length));
-                    Thread.Sleep(1);
-                }
-            }
-            else if(compareType == LocationCheckCompareType.GreaterThan)
-            {
-                while (!(currentValue > valueToCheck))
-                {
-                    currentValue = BitConverter.ToUInt32(Memory.ReadByteArray(address, length));
-                    Thread.Sleep(1);
-                }
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.GreaterThan)
+                    {
+                        return currentIntValue >= Convert.ToByte(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.LessThan)
+                    {
+                        return currentIntValue <= Convert.ToByte(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.Range)
+                    {
+                        throw new NotImplementedException("Range checks are not supported yet");
+                    }
+                    break;
+                case (LocationCheckType.UInt):
+                    var currentUIntValue = Memory.ReadUInt(location.Address);
+                    if (location.CompareType == LocationCheckCompareType.Match)
+                    {
+                        return currentUIntValue == Convert.ToByte(location.CheckValue);
 
-            }
-            else if (compareType == LocationCheckCompareType.LessThan)
-            {
-                while (!(currentValue < valueToCheck))
-                {
-                    currentValue = BitConverter.ToUInt32(Memory.ReadByteArray(address, length));
-                    Thread.Sleep(1);
-                }
-            }
-            else if (compareType == LocationCheckCompareType.Range)
-            {
-                throw new NotImplementedException("Range checks are not supported yet");
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.GreaterThan)
+                    {
+                        return currentUIntValue >= Convert.ToByte(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.LessThan)
+                    {
+                        return currentUIntValue <= Convert.ToByte(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.Range)
+                    {
+                        throw new NotImplementedException("Range checks are not supported yet");
+                    }
+                    break;
+                case (LocationCheckType.Byte):
+                    var currentByteValue = Memory.ReadByte(location.Address);
+                    if (location.CompareType == LocationCheckCompareType.Match)
+                    {
+                        return currentByteValue == Convert.ToByte(location.CheckValue);
 
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.GreaterThan)
+                    {
+                        return currentByteValue >= Convert.ToByte(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.LessThan)
+                    {
+                        return currentByteValue <= Convert.ToByte(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.Range)
+                    {
+                        throw new NotImplementedException("Range checks are not supported yet");
+                    }
+                    break;
+                default:
+                    return false;
             }
-        }
-        public static async Task MonitorAddressBit(string monitorId, uint address, int bit)
-        {
-            byte initialValue = Memory.ReadByte(address);
-            byte currentValue = initialValue;
-            bool initialBitValue = GetBitValue(initialValue, bit);
-            bool currentBitValue = initialBitValue;
-
-            while (!currentBitValue)
-            {
-                currentValue = Memory.ReadByte(address);
-                currentBitValue = GetBitValue(currentValue, bit);
-                Thread.Sleep(10);
-            }
+            return false;
         }
         private static bool GetBitValue(byte value, int bitIndex)
         {
@@ -196,7 +126,7 @@ namespace Archipelago.Core.Util
             return bytes;
         }
         public static byte IntToLittleEndianByte(int value)
-        {           
+        {
 
             return (byte)(value >> (0 * 8));
         }

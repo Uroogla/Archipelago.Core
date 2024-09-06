@@ -31,6 +31,7 @@ namespace Archipelago.Core
         private Dictionary<string, object> _options;
         public Dictionary<string, object> Options { get { return _options; } }
         public GameState GameState { get; set; }
+        private const int BATCH_SIZE = 25;
         public ArchipelagoClient(IGameClient gameClient)
         {
             Memory.CurrentProcId = gameClient.ProcId;
@@ -185,43 +186,31 @@ namespace Archipelago.Core
 
 
         }
-        private async void MonitorLocations(List<Location> locations)
+        private async Task MonitorLocations(List<Location> locations)
         {
-            foreach (var location in Locations)
-            {
-                if (location.CheckType == LocationCheckType.Bit)
-                {
-                    Task.Factory.StartNew(async () =>
-                    {
-                        await Helpers.MonitorAddressBit(location.Name, location.Address, location.AddressBit);
-                        SendLocation(location);
-                    });
+            var locationBatches = locations
+                .Select((location, index) => new { Location = location, Index = index })
+                .GroupBy(x => x.Index / BATCH_SIZE)
+                .Select(g => g.Select(x => x.Location).ToList())
+                .ToList();
+            var tasks = locationBatches.Select(x => MonitorBatch(x));
+            await Task.WhenAll(tasks);
 
-                }
-                else if (location.CheckType == LocationCheckType.Int)
+        }
+        private async Task MonitorBatch(List<Location> batch)
+        {
+
+            while (batch.Any(x => CurrentSession.Locations.AllMissingLocations.Contains(x.Id)))
+            {
+                foreach (var location in batch)
                 {
-                    Task.Factory.StartNew(async () =>
+                    if (!CurrentSession.Locations.AllLocationsChecked.Contains(location.Id))
                     {
-                        await Helpers.MonitorAddress(location.Address, int.Parse(location.CheckValue), location.CompareType);
-                        SendLocation(location);
-                    });
+                        var isCompleted = await Helpers.CheckLocation(location);
+                        if (isCompleted) SendLocation(location);
+                    }
                 }
-                else if (location.CheckType == LocationCheckType.UInt)
-                {
-                    Task.Factory.StartNew(async () =>
-                    {
-                        await Helpers.MonitorAddress(location.Address, 4, Convert.ToUInt32(location.CheckValue, 16), location.CompareType);
-                        SendLocation(location);
-                    });
-                }
-                else if (location.CheckType == LocationCheckType.Byte)
-                {
-                    Task.Factory.StartNew(async () =>
-                    {
-                        await Helpers.MonitorAddress(location.Address, byte.Parse(location.CheckValue), location.CompareType);
-                        SendLocation(location);
-                    });
-                }
+                await Task.Delay(100);
             }
         }
         public async void SendLocation(Location location)
