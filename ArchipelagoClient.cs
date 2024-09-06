@@ -15,8 +15,6 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
-#pragma warning disable CS1998
-#pragma warning disable CS4014 
 namespace Archipelago.Core
 {
     public class ArchipelagoClient
@@ -71,11 +69,7 @@ namespace Archipelago.Core
 
         public async Task Login(string playerName, string password = null)
         {
-            if (Locations == null || !Locations.Any())
-            {
-                Console.WriteLine("Please populate locations before calling Login");
-                return;
-            }
+
             var loginResult = await CurrentSession.LoginAsync(GameName, playerName, ItemsHandlingFlags.AllItems, Version.Parse("5.0.0"), password: password, requestSlotData: true);
             Console.WriteLine($"Login Result: {(loginResult.Successful ? "Success" : "Failed")}");
             if (loginResult.Successful)
@@ -90,20 +84,22 @@ namespace Archipelago.Core
             var currentSlot = CurrentSession.ConnectionInfo.Slot;
             var slotData = await CurrentSession.DataStorage.GetSlotDataAsync(currentSlot);
             var optionData = slotData["options"];
-            if (optionData != null) {
+            if (optionData != null)
+            {
                 _options = JsonConvert.DeserializeObject<Dictionary<string, object>>(optionData.ToString());
             }
 
             IsConnected = true;
             LoadGameState();
             AppDomain.CurrentDomain.ProcessExit += (sender, e) => SaveGameState();
-            MonitorLocations(Locations);
 
-            CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;         
+
+            CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;
             Connected?.Invoke(this, new ConnectionChangedEventArgs(true));
             InitItemReceiver();
             return;
         }
+
         private async void HandleMessageReceived(LogMessage message)
         {
             MessageReceived?.Invoke(this, new MessageReceivedEventArgs(message));
@@ -112,7 +108,7 @@ namespace Archipelago.Core
         {
             var update = new StatusUpdatePacket();
             update.Status = ArchipelagoClientState.ClientGoal;
-            CurrentSession.Socket.SendPacket(update);   
+            CurrentSession.Socket.SendPacket(update);
         }
 
         public async void InitItemReceiver()
@@ -123,9 +119,9 @@ namespace Archipelago.Core
                 var existingItems = GameState.ReceivedItems;
                 var newItems = CurrentSession.Items.AllItemsReceived;
                 bool newItemFound = false;
-                foreach(var item in newItems)
+                foreach (var item in newItems)
                 {
-                    if(existingItems.Any(x => x.Id == item.ItemId))
+                    if (existingItems.Any(x => x.Id == item.ItemId))
                     {
                         existingItems.Remove(existingItems.FirstOrDefault(x => x.Id == item.ItemId));
                     }
@@ -170,14 +166,24 @@ namespace Archipelago.Core
             }
             foreach (var item in unhandled)
             {
-                var newItem = new Item() { Id = (int)item.ItemId, Quantity = 1, Name = item.ItemName };
+                var flags = item.Flags;
+                var isProgression = flags.HasFlag(ItemFlags.Advancement);
+                var newItem = new Item() { Id = (int)item.ItemId, Quantity = 1, Name = item.ItemName, IsProgression = isProgression };
                 ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = newItem });
                 GameState.ReceivedItems.Add(newItem);
             }
         }
         public async void PopulateLocations(List<Location> locations)
         {
+            if (!IsConnected)
+            {
+                Console.WriteLine("Ensure client is connected before populating locations!");
+                return;
+            }
             Locations = locations;
+            MonitorLocations(Locations);
+
+
         }
         private async void MonitorLocations(List<Location> locations)
         {
@@ -244,27 +250,27 @@ namespace Archipelago.Core
 
         private void LoadGameState()
         {
-            if (IsConnected)
-            {
-                var fileName = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}.json";
-                var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                $"AP_{GameName}", fileName);
+            if (!IsConnected) { return; }
 
-                if (File.Exists(filePath))
+            var fileName = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}.json";
+            var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            $"AP_{GameName}", fileName);
+
+            if (File.Exists(filePath))
+            {
+                string content = File.ReadAllText(filePath);
+                try
                 {
-                    string content = File.ReadAllText(filePath);
-                    try
-                    {
-                        var obj = JsonConvert.DeserializeObject<GameState>(content);
-                        GameState = obj;
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine("Cannot load saved data, Json file is in an unexpected format.");
-                    }
+                    var obj = JsonConvert.DeserializeObject<GameState>(content);
+                    GameState = obj;
                 }
-                else GameState = new GameState();
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Cannot load saved data, Json file is in an unexpected format.");
+                }
             }
+            else GameState = new GameState();
+
         }
     }
 }
