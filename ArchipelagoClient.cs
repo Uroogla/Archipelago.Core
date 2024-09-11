@@ -2,6 +2,7 @@
 using Archipelago.Core.Util;
 using Archipelago.MultiClient.Net;
 using Archipelago.MultiClient.Net.Enums;
+using Archipelago.MultiClient.Net.Helpers;
 using Archipelago.MultiClient.Net.MessageLog.Messages;
 using Archipelago.MultiClient.Net.Models;
 using Archipelago.MultiClient.Net.Packets;
@@ -12,14 +13,16 @@ using System.Linq;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Reflection.Metadata.Ecma335;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace Archipelago.Core
 {
-    public class ArchipelagoClient
+    public class ArchipelagoClient : IDisposable
     {
         public bool IsConnected { get; set; }
+        public bool IsLoggedIn { get; set; }
         public event EventHandler<ItemReceivedEventArgs> ItemReceived;
         public event EventHandler<ConnectionChangedEventArgs> Disconnected;
         public event EventHandler<ConnectionChangedEventArgs> Connected;
@@ -46,6 +49,7 @@ namespace Archipelago.Core
                 GameName = gameName;
 
                 CurrentSession.Socket.SocketClosed += Socket_SocketClosed;
+                IsConnected = true;
             }
             catch (Exception ex)
             {
@@ -56,15 +60,19 @@ namespace Archipelago.Core
 
         private void Socket_SocketClosed(string reason)
         {
+            Console.WriteLine($"Connection Closed: {reason}");
             Disconnect();
         }
 
         public void Disconnect()
         {
+            CurrentSession.Socket.DisconnectAsync();
             CurrentSession.Socket.SocketClosed -= Socket_SocketClosed;
             CurrentSession.MessageLog.OnMessageReceived -= HandleMessageReceived;
+            CurrentSession.Items.ItemReceived -= ReceiveItems;
             CurrentSession = null;
             IsConnected = false;
+            IsLoggedIn = false;
             Disconnected?.Invoke(this, new ConnectionChangedEventArgs(false));
         }
 
@@ -90,7 +98,7 @@ namespace Archipelago.Core
                 _options = JsonConvert.DeserializeObject<Dictionary<string, object>>(optionData.ToString());
             }
 
-            IsConnected = true;
+            IsLoggedIn = true;
             LoadGameState();
             AppDomain.CurrentDomain.ProcessExit += (sender, e) => SaveGameState();
 
@@ -107,12 +115,15 @@ namespace Archipelago.Core
         }
         public async void SendGoalCompletion()
         {
-            var update = new StatusUpdatePacket();
-            update.Status = ArchipelagoClientState.ClientGoal;
-            CurrentSession.Socket.SendPacket(update);
+            if (IsConnected && IsLoggedIn)
+            {
+                var update = new StatusUpdatePacket();
+                update.Status = ArchipelagoClientState.ClientGoal;
+                CurrentSession.Socket.SendPacket(update);
+            }
         }
 
-        public async void InitItemReceiver()
+        private async void InitItemReceiver()
         {
             Console.WriteLine("Checking for offline items received");
             if (IsConnected)
@@ -138,14 +149,13 @@ namespace Archipelago.Core
                 }
             }
 
-            CurrentSession.Items.ItemReceived += (helper) =>
-            {
-                Console.WriteLine("Item received");
-                ReceiveItems();
-            };
+            CurrentSession.Items.ItemReceived += ReceiveItems;
+
         }
-        public async void ReceiveItems()
+        private async void ReceiveItems(ReceivedItemsHelper helper = null)
         {
+
+            Console.WriteLine("Item received");
             var items = CurrentSession.Items.AllItemsReceived;
             List<ItemInfo> unhandled = new List<ItemInfo>();
             foreach (var thing in items)
@@ -167,9 +177,7 @@ namespace Archipelago.Core
             }
             foreach (var item in unhandled)
             {
-                var flags = item.Flags;
-                var isProgression = flags.HasFlag(ItemFlags.Advancement);
-                var newItem = new Item() { Id = (int)item.ItemId, Quantity = 1, Name = item.ItemName, IsProgression = isProgression };
+                var newItem = new Item() { Id = (int)item.ItemId, Quantity = 1, Name = item.ItemName };
                 ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = newItem });
                 GameState.ReceivedItems.Add(newItem);
             }
@@ -210,7 +218,7 @@ namespace Archipelago.Core
                         if (isCompleted) SendLocation(location);
                     }
                 }
-                await Task.Delay(100);
+                await Task.Delay(500);
             }
         }
         public async void SendLocation(Location location)
@@ -224,9 +232,11 @@ namespace Archipelago.Core
             GameState.CompletedLocations.Add(location);
         }
 
-        private void SaveGameState()
+        public void SaveGameState()
         {
-            if (IsConnected)
+            if (!IsConnected || !IsLoggedIn) return;
+
+            try
             {
                 var fileName = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}.json";
                 var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -235,11 +245,16 @@ namespace Archipelago.Core
                 string content = JsonConvert.SerializeObject(GameState);
                 File.WriteAllText(filePath, content);
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Could not save Archipelago data: {0}", ex.Message);
+            }
+
         }
 
-        private void LoadGameState()
+        public void LoadGameState()
         {
-            if (!IsConnected) { return; }
+            if (!IsConnected || !IsLoggedIn) return;
 
             var fileName = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}.json";
             var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -260,6 +275,14 @@ namespace Archipelago.Core
             }
             else GameState = new GameState();
 
+        }
+
+        public void Dispose()
+        {
+            if (IsConnected)
+            {
+                Disconnect();
+            }
         }
     }
 }

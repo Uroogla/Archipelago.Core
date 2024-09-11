@@ -11,8 +11,8 @@ namespace Archipelago.Core.Models
 {
     public class Location
     {
-        [JsonConverter(typeof(HexToUIntConverter))]
-        public uint Address { get; set; }
+        [JsonConverter(typeof(HexToULongConverter))]
+        public ulong Address { get; set; }
         public int AddressBit { get; set; }
         public string Name { get; set; }
         public int Id { get; set; }

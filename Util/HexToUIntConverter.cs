@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Archipelago.Core.Util
 {
-    public class HexToUIntConverter : JsonConverter
+    public class HexToULongConverter : JsonConverter
     {
         public override bool CanConvert(Type objectType)
         {
@@ -19,9 +19,9 @@ namespace Archipelago.Core.Util
             var value = reader.Value?.ToString();
             if (value != null && value.StartsWith("0x"))
             {
-                return Convert.ToUInt32(value, 16);
+                return Convert.ToUInt64(value, 16);
             }
-            return Convert.ToUInt32(value);
+            return Convert.ToUInt64(value);
         }
 
         public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
