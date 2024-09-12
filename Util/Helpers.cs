@@ -45,16 +45,16 @@ namespace Archipelago.Core.Util
                     var currentIntValue = Memory.ReadInt(location.Address);
                     if (location.CompareType == LocationCheckCompareType.Match)
                     {
-                        return currentIntValue == Convert.ToByte(location.CheckValue);
+                        return currentIntValue == Convert.ToInt32(location.CheckValue);
 
                     }
                     else if (location.CompareType == LocationCheckCompareType.GreaterThan)
                     {
-                        return currentIntValue >= Convert.ToByte(location.CheckValue);
+                        return currentIntValue >= Convert.ToInt32(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.LessThan)
                     {
-                        return currentIntValue <= Convert.ToByte(location.CheckValue);
+                        return currentIntValue <= Convert.ToInt32(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.Range)
                     {
@@ -65,16 +65,16 @@ namespace Archipelago.Core.Util
                     var currentUIntValue = Memory.ReadUInt(location.Address);
                     if (location.CompareType == LocationCheckCompareType.Match)
                     {
-                        return currentUIntValue == Convert.ToByte(location.CheckValue);
+                        return currentUIntValue == Convert.ToUInt32(location.CheckValue);
 
                     }
                     else if (location.CompareType == LocationCheckCompareType.GreaterThan)
                     {
-                        return currentUIntValue >= Convert.ToByte(location.CheckValue);
+                        return currentUIntValue >= Convert.ToUInt32(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.LessThan)
                     {
-                        return currentUIntValue <= Convert.ToByte(location.CheckValue);
+                        return currentUIntValue <= Convert.ToUInt32(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.Range)
                     {

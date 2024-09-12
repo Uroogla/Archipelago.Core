@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection.Metadata.Ecma335;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
@@ -272,6 +273,57 @@ namespace Archipelago.Core.Util
             }
 
             return WriteByte(address, currentByte);
+        }
+
+
+        public static IEnumerable<ulong> ScanMemory<T>(T value, ulong startAddress = 0, ulong endAddress = ulong.MaxValue, int chunkSize = 4096)
+        {
+            byte[] valueBytes = GetBytes(value);
+            int valueSize = valueBytes.Length;
+
+            for (ulong address = startAddress; address < endAddress; address += (ulong)chunkSize)
+            {
+                byte[] buffer = new byte[chunkSize];
+                if (!ReadProcessMemory(GetProcessH(CurrentProcId), address, buffer, buffer.Length, out _))
+                {
+                    continue; // Skip if we can't read this memory chunk
+                }
+
+                for (int i = 0; i <= buffer.Length - valueSize; i++)
+                {
+                    if (CompareBytes(buffer, i, valueBytes))
+                    {
+                        yield return address + (ulong)i;
+                    }
+                }
+            }
+        }
+
+        private static byte[] GetBytes<T>(T value)
+        {
+            if (typeof(T) == typeof(byte)) return new[] { (byte)(object)value };
+            if (typeof(T) == typeof(short)) return BitConverter.GetBytes((short)(object)value);
+            if (typeof(T) == typeof(ushort)) return BitConverter.GetBytes((ushort)(object)value);
+            if (typeof(T) == typeof(int)) return BitConverter.GetBytes((int)(object)value);
+            if (typeof(T) == typeof(uint)) return BitConverter.GetBytes((uint)(object)value);
+            if (typeof(T) == typeof(long)) return BitConverter.GetBytes((long)(object)value);
+            if (typeof(T) == typeof(ulong)) return BitConverter.GetBytes((ulong)(object)value);
+            if (typeof(T) == typeof(float)) return BitConverter.GetBytes((float)(object)value);
+            if (typeof(T) == typeof(double)) return BitConverter.GetBytes((double)(object)value);
+            if (typeof(T) == typeof(string)) return Encoding.UTF8.GetBytes((string)(object)value);
+            throw new ArgumentException("Unsupported type");
+        }
+
+        private static bool CompareBytes(byte[] buffer, int startIndex, byte[] valueBytes)
+        {
+            for (int i = 0; i < valueBytes.Length; i++)
+            {
+                if (buffer[startIndex + i] != valueBytes[i])
+                {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 }
