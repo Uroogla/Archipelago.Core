@@ -128,7 +128,7 @@ namespace Archipelago.Core
             Console.WriteLine("Checking for offline items received");
             if (IsConnected)
             {
-                var existingItems = GameState.ReceivedItems;
+                var existingItems = GameState.ReceivedItems.Select(x => new Item() {Id = x.Id, IsProgression = x.IsProgression, Name = x.Name, Quantity = x.Quantity }).ToList();
                 var newItems = CurrentSession.Items.AllItemsReceived;
                 bool newItemFound = false;
                 foreach (var item in newItems)
