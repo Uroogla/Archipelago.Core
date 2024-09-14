@@ -194,7 +194,7 @@ namespace Archipelago.Core
 
 
         }
-        private async Task MonitorLocations(List<Location> locations)
+        public async Task MonitorLocations(List<Location> locations)
         {
             var locationBatches = locations
                 .Select((location, index) => new { Location = location, Index = index })
