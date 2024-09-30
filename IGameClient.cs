@@ -11,5 +11,6 @@ namespace Archipelago.Core
         public bool IsConnected { get; set; }
         public bool Connect();
         public int ProcId { get; set; }
+        public string ProcessName { get; set; }
     }
 }

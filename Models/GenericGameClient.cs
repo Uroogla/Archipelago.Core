@@ -9,21 +9,21 @@ namespace Archipelago.Core.Models
 {
     public class GenericGameClient : IGameClient
     {
-        private string ExeName { get; set; }
         public GenericGameClient(string exeName)
         {
-            ExeName = exeName;
+            ProcessName = exeName;
         }
         public bool IsConnected { get; set; }
-        public int ProcId { get { return Memory.GetProcIdFromExe(ExeName); } set { } }
+        public int ProcId { get { return Memory.GetProcIdFromExe(ProcessName); } set { } }
+        public string ProcessName { get; set; }
 
         public bool Connect()
         {
-            Console.WriteLine($"Connecting to {ExeName}");
+            Console.WriteLine($"Connecting to {ProcessName}");
             var pid = ProcId;
             if (pid == 0)
             {
-                Console.WriteLine($"{ExeName} not found.");
+                Console.WriteLine($"{ProcessName} not found.");
                 Console.WriteLine("Press any key to exit.");
                 Console.Read();
                 System.Environment.Exit(0);

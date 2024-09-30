@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -17,13 +18,28 @@ namespace Archipelago.Core.Util
         public const uint PROCESS_VM_OPERATION = 0x0008;
         public const uint PROCESS_SUSPEND_RESUME = 0x0800;
 
+        public const uint PAGE_READWRITE = 0x04;
+
         public const uint PAGE_EXECUTE_READWRITE = 0x40;
 
         public const uint FORMAT_MESSAGE_ALLOCATE_BUFFER = 0x00000100;
         public const uint FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200;
         public const uint FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000;
 
+        public const uint MEM_RELEASE = 0x00008000;
+        public const uint MEM_COMMIT = 0x00001000;
 
+
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint flAllocationType, uint flProtect);
+
+        [DllImport("kernel32.dll")]
+        private static extern bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint dwFreeType);
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+        [DllImport("kernel32.dll")]
+        private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
         [DllImport("user32.dll", SetLastError = true)]
         private static extern int GetWindowThreadProcessId(IntPtr hWnd, out int processID);
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -37,10 +53,10 @@ namespace Archipelago.Core.Util
         private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
 
         [DllImport("kernel32.dll", SetLastError = true, CallingConvention = CallingConvention.ThisCall)]
-        public static extern bool VirtualProtect(IntPtr processH, ulong lpAddress, int lpBuffer, uint flNewProtect, out uint lpflOldProtect);
+        private static extern bool VirtualProtect(IntPtr processH, ulong lpAddress, int lpBuffer, uint flNewProtect, out uint lpflOldProtect);
 
         [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool VirtualProtectEx(IntPtr processH, ulong lpAddress, int lpBuffer, uint flNewProtect, out uint lpflOldProtect);
+        private static extern bool VirtualProtectEx(IntPtr processH, ulong lpAddress, int lpBuffer, uint flNewProtect, out uint lpflOldProtect);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern uint GetLastError();
@@ -117,15 +133,108 @@ namespace Archipelago.Core.Util
             return pid;
         }
         public static int CurrentProcId { get; set; }
+        public static string GetLastErrorMessage()
+        {
+            uint errorCode = GetLastError();
+            IntPtr lpMsgBuf = IntPtr.Zero;
+            FormatMessage(
+                FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                IntPtr.Zero,
+                errorCode,
+                0,
+                ref lpMsgBuf,
+                0,
+                IntPtr.Zero);
+            string errorMessage = Marshal.PtrToStringAnsi(lpMsgBuf);
+            Marshal.FreeHGlobal(lpMsgBuf);
+            return $"Error {errorCode}: {errorMessage}";
+        }
         public static IntPtr GetProcessH(int proc)
         {
             return OpenProcess(PROCESS_VM_OPERATION | PROCESS_SUSPEND_RESUME | PROCESS_VM_READ | PROCESS_VM_WRITE, false, proc);
         }
+        private static uint Execute(IntPtr address, uint timeoutSeconds = 0xFFFFFFFF)
+        {
+            IntPtr thread = CreateRemoteThread(GetProcessH(CurrentProcId), IntPtr.Zero, 0, address, IntPtr.Zero, 0, IntPtr.Zero);
+            var fail = GetLastErrorMessage();
+            if (thread == IntPtr.Zero)
+            {
+                Console.WriteLine($"Failed to create remote thread. {GetLastErrorMessage()}");
+                return 0;
+            }
+            uint result = WaitForSingleObject(thread, timeoutSeconds);
 
+            Console.WriteLine($"WaitForSingleObject result: 0x{result:X}");
+            CloseHandle(thread);
+            return result;
+        }
+        public static uint ExecuteCommand(byte[] bytes, uint timeoutSeconds = 0xFFFFFFFF)
+        {
+
+            IntPtr address = Allocate((uint)bytes.Length, PAGE_EXECUTE_READWRITE);
+            if (address == IntPtr.Zero)
+            {
+                Console.WriteLine($"Failed to allocate memory. {GetLastErrorMessage()}");
+                return 0;
+            }
+
+
+            if (!Write((ulong)address, bytes))
+            {
+                Console.WriteLine($"Failed to write bytes to memory. {GetLastErrorMessage()}");
+                return 0;
+            }
+            var result = Execute(address, timeoutSeconds);
+            FreeMemory(address);
+
+            return result;
+
+        }
+        public static IntPtr Allocate(uint size, uint flProtect = PAGE_READWRITE)
+        {
+            Console.WriteLine($"Allocating memory: Size - {size}, flProtect - {flProtect}");
+            return VirtualAllocEx(GetProcessH(CurrentProcId), 0, (nint)size, MEM_COMMIT, flProtect);
+        }
+        private static bool FreeMemory(IntPtr address)
+        {
+            return VirtualFreeEx(GetProcessH(CurrentProcId), address, IntPtr.Zero, MEM_RELEASE);
+        }
         internal static string GetSystemMessage(ulong errorCode)
         {
             return Marshal.PtrToStringAnsi(IntPtr.Zero);
         }
+        public static IntPtr GetBaseAddress(string modName)
+        {
+            var proc = Process.GetProcessById(CurrentProcId);
+            ProcessModule mod = proc.Modules.Cast<ProcessModule>().FirstOrDefault(x => x.ModuleName.Split(".")[0] == modName);
+            return mod?.BaseAddress ?? IntPtr.Zero;
+        }
+
+        public static IntPtr FindSignature(IntPtr start, int size, byte[] pattern, string mask)
+        {
+            byte[] buffer = new byte[size];
+            IntPtr bytesRead;
+
+            ReadProcessMemory(GetProcessH(CurrentProcId), (ulong)start, buffer, size, out bytesRead);
+
+            for (int i = 0; i < size - pattern.Length; i++)
+            {
+                bool found = true;
+                for (int j = 0; j < pattern.Length; j++)
+                {
+                    if (mask[j] != '?' && buffer[i + j] != pattern[j])
+                    {
+                        found = false;
+                        break;
+                    }
+                }
+                if (found)
+                    return start + i;
+            }
+
+            return IntPtr.Zero;
+        }
+
         #endregion
         public static byte ReadByte(ulong address)
         {

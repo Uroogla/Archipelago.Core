@@ -21,6 +21,7 @@ namespace Archipelago.Core
 {
     public class ArchipelagoClient : IDisposable
     {
+        private const int SaveLoadTimeoutMs = 5000;
         public bool IsConnected { get; set; }
         public bool IsLoggedIn { get; set; }
         public event EventHandler<ItemReceivedEventArgs> ItemReceived;
@@ -99,8 +100,8 @@ namespace Archipelago.Core
             }
 
             IsLoggedIn = true;
-            LoadGameState();
-            AppDomain.CurrentDomain.ProcessExit += (sender, e) => SaveGameState();
+            await LoadGameStateAsync();
+            AppDomain.CurrentDomain.ProcessExit += async(sender, e) => await SaveGameStateAsync();
 
 
             CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;
@@ -232,7 +233,7 @@ namespace Archipelago.Core
             GameState.CompletedLocations.Add(location);
         }
 
-        public void SaveGameState()
+        public async Task SaveGameStateAsync()
         {
             if (!IsConnected || !IsLoggedIn) return;
 
@@ -242,8 +243,18 @@ namespace Archipelago.Core
                 var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 $"AP_{GameName}", fileName);
                 Directory.CreateDirectory(Path.GetDirectoryName(filePath));
-                string content = JsonConvert.SerializeObject(GameState);
-                File.WriteAllText(filePath, content);
+
+                using (var cts = new CancellationTokenSource(SaveLoadTimeoutMs))
+                using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
+                using (var streamWriter = new StreamWriter(fileStream))
+                using (var jsonWriter = new JsonTextWriter(streamWriter))
+                {
+                    var serializer = new JsonSerializer();
+                    await Task.Run(() =>
+                    {
+                        serializer.Serialize(jsonWriter, GameState);
+                    }, cts.Token);
+                }
             }
             catch (Exception ex)
             {
@@ -252,29 +263,53 @@ namespace Archipelago.Core
 
         }
 
-        public void LoadGameState()
+        public async Task LoadGameStateAsync()
         {
             if (!IsConnected || !IsLoggedIn) return;
 
             var fileName = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}.json";
-            var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            $"AP_{GameName}", fileName);
+            var filePath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                $"AP_{GameName}",
+                fileName);
 
             if (File.Exists(filePath))
             {
-                string content = File.ReadAllText(filePath);
                 try
                 {
-                    var obj = JsonConvert.DeserializeObject<GameState>(content);
-                    GameState = obj;
+                    using (var cts = new CancellationTokenSource(SaveLoadTimeoutMs))
+                    using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true))
+                    using (var streamReader = new StreamReader(fileStream))
+                    using (var jsonReader = new JsonTextReader(streamReader))
+                    {
+                        var serializer = new JsonSerializer();
+                        GameState = await Task.Run(() =>
+                        {
+                            return serializer.Deserialize<GameState>(jsonReader);
+                        }, cts.Token);
+                    }
+                    if (GameState == null) GameState = new GameState();
+                }
+                catch (OperationCanceledException)
+                {
+                    Console.WriteLine("LoadGameState operation timed out.");
+                    GameState = new GameState();
+                }
+                catch (JsonException ex)
+                {
+                    Console.WriteLine($"Cannot load saved data. JSON file is in an unexpected format: {ex.Message}");
+                    GameState = new GameState();
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("Cannot load saved data, Json file is in an unexpected format.");
+                    Console.WriteLine($"Error loading game state: {ex.Message}");
+                    GameState = new GameState();
                 }
             }
-            else GameState = new GameState();
-
+            else
+            {
+                GameState = new GameState();
+            }
         }
 
         public void Dispose()
