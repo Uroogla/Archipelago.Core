@@ -15,7 +15,9 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Archipelago.Xenia", "..\Arc
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Archipelago.ClientTest", "..\Archipelago.ClientTest\Archipelago.ClientTest.csproj", "{647881BB-FF1D-456D-961C-7869D48DDC4B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Archipelago.Core.GUI", "..\Archipelago.Core.GUI\Archipelago.Core.GUI.csproj", "{6A86CFAE-AE9C-4CEA-A03B-DCDFF872F366}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Archipelago.Core.GUI", "..\Archipelago.Core.GUI\Archipelago.Core.GUI.csproj", "{6A86CFAE-AE9C-4CEA-A03B-DCDFF872F366}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Archipelago.Duckstation", "..\Archipelago.Duckstation\Archipelago.Duckstation.csproj", "{29E67239-7C12-416A-A457-5A0DDBE60A09}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -51,6 +53,10 @@ Global
 		{6A86CFAE-AE9C-4CEA-A03B-DCDFF872F366}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6A86CFAE-AE9C-4CEA-A03B-DCDFF872F366}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6A86CFAE-AE9C-4CEA-A03B-DCDFF872F366}.Release|Any CPU.Build.0 = Release|Any CPU
+		{29E67239-7C12-416A-A457-5A0DDBE60A09}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{29E67239-7C12-416A-A457-5A0DDBE60A09}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{29E67239-7C12-416A-A457-5A0DDBE60A09}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{29E67239-7C12-416A-A457-5A0DDBE60A09}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

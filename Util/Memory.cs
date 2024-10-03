@@ -203,13 +203,14 @@ namespace Archipelago.Core.Util
         {
             return Marshal.PtrToStringAnsi(IntPtr.Zero);
         }
-        public static IntPtr GetBaseAddress(string modName)
+        public static nint GetBaseAddress(string modName)
         {
-            var proc = Process.GetProcessById(CurrentProcId);
-            ProcessModule mod = proc.Modules.Cast<ProcessModule>().FirstOrDefault(x => x.ModuleName.Split(".")[0] == modName);
-            return mod?.BaseAddress ?? IntPtr.Zero;
+            var process = Process.GetProcessById(CurrentProcId);
+            return process.Modules
+                .Cast<ProcessModule>()
+                .FirstOrDefault(x => x.ModuleName.Equals(modName, StringComparison.OrdinalIgnoreCase))
+                ?.BaseAddress ?? IntPtr.Zero;
         }
-
         public static IntPtr FindSignature(IntPtr start, int size, byte[] pattern, string mask)
         {
             byte[] buffer = new byte[size];
@@ -411,6 +412,7 @@ namespace Archipelago.Core.Util
         private static byte[] GetBytes<T>(T value)
         {
             if (typeof(T) == typeof(byte)) return new[] { (byte)(object)value };
+            if (typeof(T) == typeof(byte[])) return value;
             if (typeof(T) == typeof(short)) return BitConverter.GetBytes((short)(object)value);
             if (typeof(T) == typeof(ushort)) return BitConverter.GetBytes((ushort)(object)value);
             if (typeof(T) == typeof(int)) return BitConverter.GetBytes((int)(object)value);
