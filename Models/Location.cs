@@ -15,6 +15,7 @@ namespace Archipelago.Core.Models
         public ulong Address { get; set; }
         public int AddressBit { get; set; }
         public string Name { get; set; }
+        public string Category { get; set; }
         public int Id { get; set; }
         public LocationCheckType CheckType { get; set; }
         public string CheckValue { get; set; }

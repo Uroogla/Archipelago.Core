@@ -11,8 +11,9 @@ namespace Archipelago.Core.Models
     public class Item : INotifyPropertyChanged
     {
         private string name;
+        private string category;
         private int quantity;
-        private int id;
+        private long id;
         private bool isProgression;
         public string Name
         {
@@ -38,7 +39,19 @@ namespace Archipelago.Core.Models
                 }
             }
         }
-        public int Id
+        public string Category
+        {
+            get => category;
+            set
+            {
+                if (category != value)
+                {
+                    category = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
+        public long Id
         {
             get => id;
             set

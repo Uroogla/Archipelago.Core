@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Newtonsoft.Json.Linq;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -18,8 +19,8 @@ namespace Archipelago.Core.Util
         public const uint PROCESS_VM_OPERATION = 0x0008;
         public const uint PROCESS_SUSPEND_RESUME = 0x0800;
 
+        private const uint PAGE_READONLY = 0x02;
         public const uint PAGE_READWRITE = 0x04;
-
         public const uint PAGE_EXECUTE_READWRITE = 0x40;
 
         public const uint FORMAT_MESSAGE_ALLOCATE_BUFFER = 0x00000100;
@@ -33,7 +34,8 @@ namespace Archipelago.Core.Util
 
         [DllImport("kernel32.dll")]
         private static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint flAllocationType, uint flProtect);
-
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool VirtualProtectEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint flNewProtect, out uint lpflOldProtect);
         [DllImport("kernel32.dll")]
         private static extern bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint dwFreeType);
         [DllImport("kernel32.dll")]
@@ -190,6 +192,33 @@ namespace Archipelago.Core.Util
             return result;
 
         }
+
+        public static bool FreezeAddress(ulong address, int length)
+        {
+            uint oldProtect;
+            bool result = VirtualProtectEx(GetProcessH(CurrentProcId), (IntPtr)address, (IntPtr)length, PAGE_READONLY, out oldProtect);
+
+            if (!result)
+            {
+                Console.WriteLine($"Failed to freeze address. Error: {GetLastErrorMessage()}");
+            }
+
+            return result;
+        }
+
+        public static bool UnfreezeAddress(ulong address, int length)
+        {
+            uint oldProtect;
+            bool result = VirtualProtectEx(GetProcessH(CurrentProcId), (IntPtr)address, (IntPtr)length, PAGE_READWRITE, out oldProtect);
+
+            if (!result)
+            {
+                Console.WriteLine($"Failed to unfreeze address. Error: {GetLastErrorMessage()}");
+            }
+
+            return result;
+        }
+
         public static IntPtr Allocate(uint size, uint flProtect = PAGE_READWRITE)
         {
             Console.WriteLine($"Allocating memory: Size - {size}, flProtect - {flProtect}");
@@ -388,7 +417,15 @@ namespace Archipelago.Core.Util
 
         public static IEnumerable<ulong> ScanMemory<T>(T value, ulong startAddress = 0, ulong endAddress = ulong.MaxValue, int chunkSize = 4096)
         {
-            byte[] valueBytes = GetBytes(value);
+            byte[] valueBytes;
+            if (value is byte[] bytes)
+            {
+                valueBytes = bytes;
+            }
+            else
+            {
+                valueBytes = GetBytes(value);
+            }
             int valueSize = valueBytes.Length;
 
             for (ulong address = startAddress; address < endAddress; address += (ulong)chunkSize)
@@ -408,11 +445,24 @@ namespace Archipelago.Core.Util
                 }
             }
         }
-
+        public static Task MonitorAddressForAction<T>(ulong address, Action action, Func<T, bool> criteria)
+        {
+            int size = GetSizeOfType(typeof(T));
+            var initialValue = ConvertByteArrayToT<T>(Memory.ReadByteArray(address, size));
+            return Task.Run(async() =>
+            {
+                var value = initialValue;
+                while (!criteria(value))
+                {
+                    value = ConvertByteArrayToT<T>(Memory.ReadByteArray(address, size));
+                    await Task.Delay(10);
+                }
+                action();
+            });
+        }
         private static byte[] GetBytes<T>(T value)
         {
             if (typeof(T) == typeof(byte)) return new[] { (byte)(object)value };
-            if (typeof(T) == typeof(byte[])) return value;
             if (typeof(T) == typeof(short)) return BitConverter.GetBytes((short)(object)value);
             if (typeof(T) == typeof(ushort)) return BitConverter.GetBytes((ushort)(object)value);
             if (typeof(T) == typeof(int)) return BitConverter.GetBytes((int)(object)value);
@@ -424,7 +474,31 @@ namespace Archipelago.Core.Util
             if (typeof(T) == typeof(string)) return Encoding.UTF8.GetBytes((string)(object)value);
             throw new ArgumentException("Unsupported type");
         }
+        private static T ConvertByteArrayToT<T>(byte[] bytes)
+        {
+            if (typeof(T) == typeof(byte)) return (T)(object)bytes[0];
+            if (typeof(T) == typeof(short)) return (T)(object)BitConverter.ToInt16(bytes, 0);
+            if (typeof(T) == typeof(ushort)) return (T)(object)BitConverter.ToUInt16(bytes, 0);
+            if (typeof(T) == typeof(int)) return (T)(object)BitConverter.ToInt32(bytes, 0);
+            if (typeof(T) == typeof(uint)) return (T)(object)BitConverter.ToUInt32(bytes, 0);
+            if (typeof(T) == typeof(long)) return (T)(object)BitConverter.ToInt64(bytes, 0);
+            if (typeof(T) == typeof(ulong)) return (T)(object)BitConverter.ToUInt64(bytes, 0);
+            if (typeof(T) == typeof(float)) return (T)(object)BitConverter.ToSingle(bytes, 0);
+            if (typeof(T) == typeof(double)) return (T)(object)BitConverter.ToDouble(bytes, 0);
 
+            // For other types, you might need to use a more complex deserialization method
+            throw new NotSupportedException($"Type {typeof(T)} is not supported for conversion from byte array.");
+        }
+        private static int GetSizeOfType(Type type)
+        {
+            if (type == typeof(byte)) return 1;
+            if (type == typeof(short) || type == typeof(ushort)) return 2;
+            if (type == typeof(int) || type == typeof(uint) || type == typeof(float)) return 4;
+            if (type == typeof(long) || type == typeof(ulong) || type == typeof(double)) return 8;
+
+            // For other types, you might need to use Marshal.SizeOf
+            return System.Runtime.InteropServices.Marshal.SizeOf(type);
+        }
         private static bool CompareBytes(byte[] buffer, int startIndex, byte[] valueBytes)
         {
             for (int i = 0; i < valueBytes.Length; i++)

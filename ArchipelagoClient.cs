@@ -101,7 +101,7 @@ namespace Archipelago.Core
 
             IsLoggedIn = true;
             await LoadGameStateAsync();
-            AppDomain.CurrentDomain.ProcessExit += async(sender, e) => await SaveGameStateAsync();
+            AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
 
 
             CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;
@@ -124,64 +124,60 @@ namespace Archipelago.Core
             }
         }
 
-        private async void InitItemReceiver()
+        private void ProcessNewItems(IEnumerable<ItemInfo> newItems, bool notifyReceivedItems = false)
         {
-            Console.WriteLine("Checking for offline items received");
-            if (IsConnected)
+            Console.WriteLine(notifyReceivedItems ? "Item received" : "Checking for offline items received");
+
+            if (!IsConnected) return;
+
+            var existingItems = GameState.ReceivedItems.ToDictionary(x => x.Id, x => x);
+            bool newItemFound = false;
+
+            foreach (var newItem in newItems)
             {
-                var existingItems = GameState.ReceivedItems.Select(x => new Item() {Id = x.Id, IsProgression = x.IsProgression, Name = x.Name, Quantity = x.Quantity }).ToList();
-                var newItems = CurrentSession.Items.AllItemsReceived;
-                bool newItemFound = false;
-                foreach (var item in newItems)
+                if (existingItems.TryGetValue(newItem.ItemId, out var existingItem))
                 {
-                    if (existingItems.Any(x => x.Id == item.ItemId))
-                    {
-                        existingItems.Remove(existingItems.FirstOrDefault(x => x.Id == item.ItemId));
-                    }
-                    else
-                    {
-                        newItemFound = true;
-                        break;
-                    }
-                }
-                if (newItemFound)
-                {
-                    ReceiveItems();
-                }
-            }
-
-            CurrentSession.Items.ItemReceived += ReceiveItems;
-
-        }
-        private async void ReceiveItems(ReceivedItemsHelper helper = null)
-        {
-
-            Console.WriteLine("Item received");
-            var items = CurrentSession.Items.AllItemsReceived;
-            List<ItemInfo> unhandled = new List<ItemInfo>();
-            foreach (var thing in items)
-            {
-                //Have received an item of this type before
-                if (GameState.ReceivedItems.Any(x => thing.ItemId == x.Id) || unhandled.Any(x => x.ItemId == thing.ItemId))
-                {
-                    //There is a new item of this type that hasnt been received yet
-                    if (items.Count(x => x.ItemId == thing.ItemId) > (GameState.ReceivedItems.Count(ri => ri.Id == thing.ItemId) + unhandled.Count(x => x.ItemId == thing.ItemId)))
-                    {
-                        unhandled.Add(thing);
-                    }
+                    // Item exists, increment quantity
+                    existingItem.Quantity++;
+                    newItemFound = true;
                 }
                 else
                 {
-                    //Havent received any of this item yet
-                    unhandled.Add(thing);
+                    // New item, add it to existing items
+                    existingItems[newItem.ItemId] = new Item
+                    {
+                        Id = newItem.ItemId,
+                        Name = newItem.ItemName,
+                        Quantity = 1
+                    };
+                    newItemFound = true;
                 }
             }
-            foreach (var item in unhandled)
+
+            if (newItemFound)
             {
-                var newItem = new Item() { Id = (int)item.ItemId, Quantity = 1, Name = item.ItemName };
-                ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = newItem });
-                GameState.ReceivedItems.Add(newItem);
+                GameState.ReceivedItems = existingItems.Values.ToList();
+
+                if (notifyReceivedItems)
+                {
+                    // Notify about new or updated items
+                    foreach (var item in existingItems.Values)
+                    {
+                        ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
+                    }
+                }
             }
+        }
+
+        private void InitItemReceiver()
+        {
+            ProcessNewItems(CurrentSession.Items.AllItemsReceived);
+            CurrentSession.Items.ItemReceived += ReceiveItems;
+        }
+
+        private void ReceiveItems(ReceivedItemsHelper helper = null)
+        {
+            ProcessNewItems(CurrentSession.Items.AllItemsReceived, true);
         }
         public async void PopulateLocations(List<Location> locations)
         {
