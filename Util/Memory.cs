@@ -237,7 +237,7 @@ namespace Archipelago.Core.Util
             var process = Process.GetProcessById(CurrentProcId);
             return process.Modules
                 .Cast<ProcessModule>()
-                .FirstOrDefault(x => x.ModuleName.Equals(modName, StringComparison.OrdinalIgnoreCase))
+                .FirstOrDefault(x => x.ModuleName.Contains(modName, StringComparison.OrdinalIgnoreCase))
                 ?.BaseAddress ?? IntPtr.Zero;
         }
         public static IntPtr FindSignature(IntPtr start, int size, byte[] pattern, string mask)
@@ -306,6 +306,18 @@ namespace Archipelago.Core.Util
             byte[] dataBuffer = new byte[4];
             ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
             return BitConverter.ToInt32(dataBuffer, 0);
+        }
+        public static long ReadLong(ulong address)
+        {
+            byte[] dataBuffer = new byte[8];
+            ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
+            return BitConverter.ToInt64(dataBuffer, 0);
+        }
+        public static ulong ReadULong(ulong address)
+        {
+            byte[] dataBuffer = new byte[8];
+            ReadProcessMemory(GetProcessH(CurrentProcId), address, dataBuffer, dataBuffer.Length, out _);
+            return BitConverter.ToUInt64(dataBuffer, 0);
         }
         public static int ReadBigEndianInt(ulong address)
         {
@@ -414,7 +426,13 @@ namespace Archipelago.Core.Util
             return WriteByte(address, currentByte);
         }
 
-
+        public static byte[] ReadFromPointer(ulong ptrAddress, int length, int depth)
+        {
+            var next = Memory.ReadByteArray(ptrAddress, length);
+            if (--depth == 0)
+                return next;
+            return ReadFromPointer(BitConverter.ToUInt32(next), length, depth);
+        }
         public static IEnumerable<ulong> ScanMemory<T>(T value, ulong startAddress = 0, ulong endAddress = ulong.MaxValue, int chunkSize = 4096)
         {
             byte[] valueBytes;
