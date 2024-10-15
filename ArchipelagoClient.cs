@@ -7,6 +7,7 @@ using Archipelago.MultiClient.Net.MessageLog.Messages;
 using Archipelago.MultiClient.Net.Models;
 using Archipelago.MultiClient.Net.Packets;
 using Newtonsoft.Json;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -54,14 +55,14 @@ namespace Archipelago.Core
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Couldn't connect to Archipelago");
-                Console.WriteLine(ex.Message);
+                Log.Logger.Information("Couldn't connect to Archipelago");
+                Log.Logger.Information(ex.Message);
             }
         }
 
         private void Socket_SocketClosed(string reason)
         {
-            Console.WriteLine($"Connection Closed: {reason}");
+            Log.Logger.Information($"Connection Closed: {reason}");
             Disconnect();
         }
 
@@ -81,14 +82,14 @@ namespace Archipelago.Core
         {
 
             var loginResult = await CurrentSession.LoginAsync(GameName, playerName, ItemsHandlingFlags.AllItems, Version.Parse("5.0.0"), password: password, requestSlotData: true);
-            Console.WriteLine($"Login Result: {(loginResult.Successful ? "Success" : "Failed")}");
+            Log.Logger.Information($"Login Result: {(loginResult.Successful ? "Success" : "Failed")}");
             if (loginResult.Successful)
             {
-                Console.WriteLine($"Connected as Player: {playerName} playing {GameName}");
+                Log.Logger.Information($"Connected as Player: {playerName} playing {GameName}");
             }
             else
             {
-                Console.WriteLine($"Login failed.");
+                Log.Logger.Information($"Login failed.");
                 return;
             }
             var currentSlot = CurrentSession.ConnectionInfo.Slot;
@@ -171,7 +172,7 @@ namespace Archipelago.Core
         {
             if (!IsConnected || CurrentSession == null)
             {
-                Console.WriteLine("Ensure client is connected before populating locations!");
+                Log.Logger.Information("Ensure client is connected before populating locations!");
                 return;
             }
             Locations = locations;
@@ -210,7 +211,7 @@ namespace Archipelago.Core
         {
             if (!(IsConnected))
             {
-                Console.WriteLine("Must be connected and logged in to send locations.");
+                Log.Logger.Information("Must be connected and logged in to send locations.");
                 return;
             }
             await CurrentSession.Locations.CompleteLocationChecksAsync(new[] { (long)location.Id });
@@ -242,7 +243,7 @@ namespace Archipelago.Core
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Could not save Archipelago data: {0}", ex.Message);
+                Log.Logger.Information("Could not save Archipelago data: {0}", ex.Message);
             }
 
         }
@@ -276,17 +277,17 @@ namespace Archipelago.Core
                 }
                 catch (OperationCanceledException)
                 {
-                    Console.WriteLine("LoadGameState operation timed out.");
+                    Log.Logger.Information("LoadGameState operation timed out.");
                     GameState = new GameState();
                 }
                 catch (JsonException ex)
                 {
-                    Console.WriteLine($"Cannot load saved data. JSON file is in an unexpected format: {ex.Message}");
+                    Log.Logger.Information($"Cannot load saved data. JSON file is in an unexpected format: {ex.Message}");
                     GameState = new GameState();
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error loading game state: {ex.Message}");
+                    Log.Logger.Information($"Error loading game state: {ex.Message}");
                     GameState = new GameState();
                 }
             }
