@@ -30,22 +30,38 @@ namespace Archipelago.Core.Util
         public const uint MEM_RELEASE = 0x00008000;
         public const uint MEM_COMMIT = 0x00001000;
 
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct MODULEINFO
+        {
+            public IntPtr lpBaseOfDll;
+            public uint SizeOfImage;
+            public IntPtr EntryPoint;
+        }
 
-
+        [DllImport("psapi.dll", SetLastError = true)]
+        internal static extern bool GetModuleInformation(IntPtr hProcess, IntPtr hModule, out MODULEINFO lpmodinfo, uint cb);
+        internal static MODULEINFO GetModuleInfo(string moduleName)
+        {
+            MODULEINFO moduleInfo = new MODULEINFO();
+            GetModuleInformation(GetProcessH(CurrentProcId), (nint)GetBaseAddress(moduleName), out moduleInfo, (uint)Marshal.SizeOf(typeof(MODULEINFO)));
+            return moduleInfo;
+        }
         [DllImport("kernel32.dll")]
-        private static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint flAllocationType, uint flProtect);
+        internal static extern IntPtr GetModuleHandle(string lpModuleName);
+        [DllImport("kernel32.dll")]
+        internal static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint flAllocationType, uint flProtect);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool VirtualProtectEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint flNewProtect, out uint lpflOldProtect);
         [DllImport("kernel32.dll")]
-        private static extern bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint dwFreeType);
+        internal static extern bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint dwFreeType);
         [DllImport("kernel32.dll")]
-        private static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+        internal static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
         [DllImport("kernel32.dll")]
-        private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+        internal static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
         [DllImport("user32.dll", SetLastError = true)]
-        private static extern int GetWindowThreadProcessId(IntPtr hWnd, out int processID);
+        internal static extern int GetWindowThreadProcessId(IntPtr hWnd, out int processID);
         [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool ReadProcessMemory(IntPtr processH, ulong lpBaseAddress, byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesRead);
+        internal static extern bool ReadProcessMemory(IntPtr processH, ulong lpBaseAddress, byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesRead);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool WriteProcessMemory(IntPtr processH, ulong lpBaseAddress, byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesWritten);
@@ -66,7 +82,7 @@ namespace Archipelago.Core.Util
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern int FormatMessage(uint dwFlags, IntPtr lpSource, uint dwMessageId, uint dwLanguageId, ref IntPtr lpBuffer, uint nSize, IntPtr Arguments);
 
-        private static int GetProcessID(string procName)
+        internal static int GetProcessID(string procName)
 
         {
             Process[] Processes = Process.GetProcessesByName(procName);
@@ -83,7 +99,14 @@ namespace Archipelago.Core.Util
                 return 0;
             }
         }
-
+        internal static Process GetProcessById(int id)
+        {
+            return Process.GetProcessById(id);
+        }
+        public static Process GetCurrentProcess()
+        {
+            return GetProcessById(CurrentProcId);
+        }
         //Make PID available anywhere within the program.
         public static int BIZHAWK_PROCESSID
         {
@@ -110,14 +133,6 @@ namespace Archipelago.Core.Util
                 {
                     pid = GetProcessID("pcsx2-qt");
                 }
-                return pid;
-            }
-        }
-        public static int DARKSOULS_PROCESSID
-        {
-            get
-            {
-                var pid = GetProcessID("DarkSoulsRemastered");
                 return pid;
             }
         }
@@ -151,7 +166,7 @@ namespace Archipelago.Core.Util
             Marshal.FreeHGlobal(lpMsgBuf);
             return $"Error {errorCode}: {errorMessage}";
         }
-        public static IntPtr GetProcessH(int proc)
+        internal static IntPtr GetProcessH(int proc)
         {
             return OpenProcess(PROCESS_VM_OPERATION | PROCESS_SUSPEND_RESUME | PROCESS_VM_READ | PROCESS_VM_WRITE, false, proc);
         }
@@ -224,7 +239,7 @@ namespace Archipelago.Core.Util
             Console.WriteLine($"Allocating memory: Size - {size}, flProtect - {flProtect}");
             return VirtualAllocEx(GetProcessH(CurrentProcId), 0, (nint)size, MEM_COMMIT, flProtect);
         }
-        private static bool FreeMemory(IntPtr address)
+        public static bool FreeMemory(IntPtr address)
         {
             return VirtualFreeEx(GetProcessH(CurrentProcId), address, IntPtr.Zero, MEM_RELEASE);
         }
@@ -232,13 +247,13 @@ namespace Archipelago.Core.Util
         {
             return Marshal.PtrToStringAnsi(IntPtr.Zero);
         }
-        public static nint GetBaseAddress(string modName)
+        public static ulong GetBaseAddress(string modName)
         {
             var process = Process.GetProcessById(CurrentProcId);
-            return process.Modules
+            return (ulong)(process.Modules
                 .Cast<ProcessModule>()
                 .FirstOrDefault(x => x.ModuleName.Contains(modName, StringComparison.OrdinalIgnoreCase))
-                ?.BaseAddress ?? IntPtr.Zero;
+                ?.BaseAddress ?? IntPtr.Zero);
         }
         public static IntPtr FindSignature(IntPtr start, int size, byte[] pattern, string mask)
         {

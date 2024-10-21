@@ -25,6 +25,7 @@ namespace Archipelago.Core
         private const int SaveLoadTimeoutMs = 5000;
         public bool IsConnected { get; set; }
         public bool IsLoggedIn { get; set; }
+        public bool IsSaving { get; set; }
         public event EventHandler<ItemReceivedEventArgs> ItemReceived;
         public event EventHandler<ConnectionChangedEventArgs> Disconnected;
         public event EventHandler<ConnectionChangedEventArgs> Connected;
@@ -72,7 +73,7 @@ namespace Archipelago.Core
             CurrentSession.Socket.DisconnectAsync();
             CurrentSession.Socket.SocketClosed -= Socket_SocketClosed;
             CurrentSession.MessageLog.OnMessageReceived -= HandleMessageReceived;
-            CurrentSession.Items.ItemReceived -= (e)=> ReceiveItems();
+            CurrentSession.Items.ItemReceived -= async (e) => await ReceiveItems();
             CurrentSession = null;
             IsConnected = false;
             IsLoggedIn = false;
@@ -91,7 +92,7 @@ namespace Archipelago.Core
             }
             else
             {
-                Log.Logger.Information($"Login failed.");                
+                Log.Logger.Information($"Login failed.");
                 return;
             }
             var currentSlot = CurrentSession.ConnectionInfo.Slot;
@@ -105,19 +106,22 @@ namespace Archipelago.Core
             IsLoggedIn = true;
             await LoadGameStateAsync();
             AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
+            AppDomain.CurrentDomain.FirstChanceException += async (sender, e) => await SaveGameStateAsync();
+            AppDomain.CurrentDomain.UnhandledException += async (sender, e) => await SaveGameStateAsync();
+            AppDomain.CurrentDomain.DomainUnload += async (sender, e) => await SaveGameStateAsync();
 
 
             CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;
             Connected?.Invoke(this, new ConnectionChangedEventArgs(true));
-            CurrentSession.Items.ItemReceived += (e)=> ReceiveItems();
-            ReceiveItems();
+            CurrentSession.Items.ItemReceived += async (e) => await ReceiveItems();
+            await ReceiveItems();
             return;
         }
 
         private async void HandleMessageReceived(LogMessage message)
         {
             Log.Logger.Debug($"Message received");
-           MessageReceived?.Invoke(this, new MessageReceivedEventArgs(message));
+            MessageReceived?.Invoke(this, new MessageReceivedEventArgs(message));
         }
         public async void SendGoalCompletion()
         {
@@ -130,7 +134,7 @@ namespace Archipelago.Core
             }
         }
 
-        private void ReceiveItems()
+        private async Task ReceiveItems()
         {
             Log.Logger.Debug($"Item Received");
             if (!IsConnected) return;
@@ -155,12 +159,12 @@ namespace Archipelago.Core
                     if (existingCount > 0)
                     {
                         Log.Logger.Debug($"Increasing received quantity");
-                       GameState.ReceivedItems.First(x => x.Id == item.Id).Quantity++;
+                        GameState.ReceivedItems.First(x => x.Id == item.Id).Quantity++;
                     }
                     else
                     {
                         Log.Logger.Debug($"Adding to received items list");
-                       GameState.ReceivedItems.Add(item);
+                        GameState.ReceivedItems.Add(item);
                     }
 
                     ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
@@ -171,6 +175,7 @@ namespace Archipelago.Core
                     Log.Logger.Debug($"Item already received");
                 }
             }
+            await SaveGameStateAsync();
         }
 
         public async void PopulateLocations(List<Location> locations)
@@ -183,7 +188,7 @@ namespace Archipelago.Core
             Locations = locations;
             Log.Logger.Debug($"Monitoring {locations.Count} locations");
 
-           MonitorLocations(Locations);
+            MonitorLocations(Locations);
 
 
         }
@@ -196,24 +201,35 @@ namespace Archipelago.Core
                 .ToList();
             Log.Logger.Debug($"Created {locationBatches.Count} batches");
 
-           var tasks = locationBatches.Select(x => MonitorBatch(x));
+            var tasks = locationBatches.Select(x => MonitorBatch(x));
             await Task.WhenAll(tasks);
 
         }
         private async Task MonitorBatch(List<Location> batch)
         {
+            List<Location> completed = new List<Location>();
 
-            while (batch.Any(x => CurrentSession.Locations.AllMissingLocations.Contains(x.Id)))
+            while (!batch.All(x => completed.Any(y => y.Id == x.Id)))
             {
                 foreach (var location in batch)
                 {
-                    if (!CurrentSession.Locations.AllLocationsChecked.Contains(location.Id))
+                    var isCompleted = await Helpers.CheckLocation(location);
+                    if (isCompleted)
                     {
-                        Log.Logger.Verbose($"Checking location {location.Id}");
-                       var isCompleted = await Helpers.CheckLocation(location);
-                        if (isCompleted) SendLocation(location);
+                        completed.Add(location);
+                        //  Log.Logger.Information(JsonConvert.SerializeObject(location));
                     }
                 }
+                if (completed.Any())
+                {
+                    foreach (var location in completed)
+                    {
+                        SendLocation(location);
+                        Log.Logger.Information($"{location.Name} ({location.Id}) Completed");
+                        batch.Remove(location);
+                    }
+                }
+                completed.Clear();
                 await Task.Delay(500);
             }
         }
@@ -226,13 +242,14 @@ namespace Archipelago.Core
             }
             Log.Logger.Debug($"Marking location {location.Id} as complete");
 
-           await CurrentSession.Locations.CompleteLocationChecksAsync(new[] { (long)location.Id });
+            await CurrentSession.Locations.CompleteLocationChecksAsync(new[] { (long)location.Id });
             GameState.CompletedLocations.Add(location);
         }
 
         public async Task SaveGameStateAsync()
         {
-            if (!IsConnected || !IsLoggedIn) return;
+            if (!IsConnected || !IsLoggedIn || IsSaving) return;
+            IsSaving = true;
             Log.Logger.Debug($"Saving game state");
             try
             {
@@ -258,7 +275,10 @@ namespace Archipelago.Core
                 Log.Logger.Information("Could not save Archipelago data: {0}", ex.Message);
                 Log.Logger.Debug($"{ex.StackTrace}", ex);
             }
-
+            finally
+            {
+                IsSaving = false;
+            }
         }
 
         public async Task LoadGameStateAsync()
@@ -266,7 +286,7 @@ namespace Archipelago.Core
             if (!IsConnected || !IsLoggedIn) return;
             Log.Logger.Debug($"Loading game state");
 
-           var fileName = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}.json";
+            var fileName = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}.json";
             var filePath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 $"AP_{GameName}",
