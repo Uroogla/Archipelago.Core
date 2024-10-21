@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace Archipelago.Core.Util
 {
-    public class LagSimulator
+    internal class LagSimulator
     {
         [DllImport("kernel32.dll")]
         private static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
