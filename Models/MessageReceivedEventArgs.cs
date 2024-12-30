@@ -13,6 +13,6 @@ namespace Archipelago.Core.Models
         {
             Message = msg;
         }
-        LogMessage Message { get; set; }
+        public LogMessage Message { get; set; }
     }
 }

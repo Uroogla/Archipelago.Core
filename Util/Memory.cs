@@ -31,7 +31,7 @@ namespace Archipelago.Core.Util
         public const uint MEM_COMMIT = 0x00001000;
 
         [StructLayout(LayoutKind.Sequential)]
-        internal struct MODULEINFO
+        public struct MODULEINFO
         {
             public IntPtr lpBaseOfDll;
             public uint SizeOfImage;
@@ -40,7 +40,7 @@ namespace Archipelago.Core.Util
 
         [DllImport("psapi.dll", SetLastError = true)]
         internal static extern bool GetModuleInformation(IntPtr hProcess, IntPtr hModule, out MODULEINFO lpmodinfo, uint cb);
-        internal static MODULEINFO GetModuleInfo(string moduleName)
+        public static MODULEINFO GetModuleInfo(string moduleName)
         {
             MODULEINFO moduleInfo = new MODULEINFO();
             GetModuleInformation(GetProcessH(CurrentProcId), (nint)GetBaseAddress(moduleName), out moduleInfo, (uint)Marshal.SizeOf(typeof(MODULEINFO)));

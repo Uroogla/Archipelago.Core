@@ -5,7 +5,7 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.1.9</Version>
+    <Version>0.2.0</Version>
     <Authors>ArsonAssassin</Authors>
     <Product>Archipelago.Core</Product>
     <PackageId>Archipelago.Core</PackageId>
@@ -17,7 +17,7 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Archipelago.MultiClient.Net" Version="6.3.1" />
+    <PackageReference Include="Archipelago.MultiClient.Net" Version="6.5.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Serilog" Version="4.0.2" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
