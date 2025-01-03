@@ -7,7 +7,6 @@ using Archipelago.MultiClient.Net.Helpers;
 using Archipelago.MultiClient.Net.MessageLog.Messages;
 using Archipelago.MultiClient.Net.Models;
 using Archipelago.MultiClient.Net.Packets;
-using Newtonsoft.Json;
 using Serilog;
 using System;
 using System.Collections.Generic;
@@ -17,6 +16,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Reflection.Metadata.Ecma335;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace Archipelago.Core
@@ -26,7 +26,6 @@ namespace Archipelago.Core
         private const int SaveLoadTimeoutMs = 5000;
         public bool IsConnected { get; set; }
         public bool IsLoggedIn { get; set; }
-        public bool IsSaving { get; set; }
         public event EventHandler<ItemReceivedEventArgs> ItemReceived;
         public event EventHandler<ConnectionChangedEventArgs> Disconnected;
         public event EventHandler<ConnectionChangedEventArgs> Connected;
@@ -38,10 +37,18 @@ namespace Archipelago.Core
         private Dictionary<string, object> _options;
         public Dictionary<string, object> Options { get { return _options; } }
         public GameState GameState { get; set; }
+
+        private readonly SemaphoreSlim _saveSemaphore = new SemaphoreSlim(1, 1);
+
         private const int BATCH_SIZE = 25;
+        private CancellationTokenSource _cancellationTokenSource { get; set; } = new CancellationTokenSource();
         public ArchipelagoClient(IGameClient gameClient)
         {
             Memory.CurrentProcId = gameClient.ProcId;
+            AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
+            AppDomain.CurrentDomain.FirstChanceException += async (sender, e) => await SaveGameStateAsync();
+            AppDomain.CurrentDomain.UnhandledException += async (sender, e) => await SaveGameStateAsync();
+            AppDomain.CurrentDomain.DomainUnload += async (sender, e) => await SaveGameStateAsync();
         }
         public async Task Connect(string host, string gameName)
         {
@@ -54,18 +61,20 @@ namespace Archipelago.Core
                 GameName = gameName;
 
                 CurrentSession.Socket.SocketClosed += Socket_SocketClosed;
+                CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;
+                CurrentSession.Items.ItemReceived += async (e) => await ReceiveItems();
                 IsConnected = true;
             }
             catch (Exception ex)
             {
-                Log.Logger.Information("Couldn't connect to Archipelago");
-                Log.Logger.Information(ex.Message);
+                Log.Information("Couldn't connect to Archipelago");
+                Log.Information(ex.Message);
             }
         }
 
         private void Socket_SocketClosed(string reason)
         {
-            Log.Logger.Information($"Connection Closed: {reason}");
+            Log.Information($"Connection Closed: {reason}");
             Disconnect();
         }
 
@@ -73,76 +82,72 @@ namespace Archipelago.Core
         {
             if (CurrentSession != null)
             {
-                Log.Logger.Information($"Disconnecting...");
+                Log.Information($"Disconnecting...");
                 CurrentSession.Socket.DisconnectAsync();
                 CurrentSession.Socket.SocketClosed -= Socket_SocketClosed;
                 CurrentSession.MessageLog.OnMessageReceived -= HandleMessageReceived;
-                CurrentSession.Items.ItemReceived -= async (e) => await ReceiveItems(e);
+                CurrentSession.Items.ItemReceived -= async (e) => await ReceiveItems();
+                CancelMonitors();
                 CurrentSession = null;
             }
             IsConnected = false;
             IsLoggedIn = false;
             Disconnected?.Invoke(this, new ConnectionChangedEventArgs(false));
-            Log.Logger.Information($"Disconnected");
+            Log.Information($"Disconnected");
         }
 
         public async Task Login(string playerName, string password = null)
         {
-
             var loginResult = await CurrentSession.LoginAsync(GameName, playerName, ItemsHandlingFlags.AllItems, Version.Parse("5.0.0"), password: password, requestSlotData: true);
-            Log.Logger.Information($"Login Result: {(loginResult.Successful ? "Success" : "Failed")}");
+            Log.Information($"Login Result: {(loginResult.Successful ? "Success" : "Failed")}");
             if (loginResult.Successful)
             {
-                Log.Logger.Information($"Connected as Player: {playerName} playing {GameName}");
+                Log.Information($"Connected as Player: {playerName} playing {GameName}");
             }
             else
             {
-                Log.Logger.Information($"Login failed.");
+                Log.Information($"Login failed.");
                 return;
             }
             var currentSlot = CurrentSession.ConnectionInfo.Slot;
             var slotData = await CurrentSession.DataStorage.GetSlotDataAsync(currentSlot);
-            Log.Logger.Information("Loading Options.");
+            Log.Information("Loading Options.");
             if (slotData.ContainsKey("options"))
             {
                 var optionData = slotData["options"];
                 if (optionData != null)
                 {
-                    _options = JsonConvert.DeserializeObject<Dictionary<string, object>>(optionData.ToString());
+
+                    _options = JsonSerializer.Deserialize<Dictionary<string, object>>(optionData.ToString());
                 }
-                Log.Logger.Debug($"Options: \n\t{JsonConvert.SerializeObject(optionData)}");
+                Log.Debug($"Options: \n\t{JsonSerializer.Serialize(optionData)}");
             }
             else
             {
-                Log.Logger.Information("No options found.");
+                Log.Information("No options found.");
             }
             IsLoggedIn = true;
-            await LoadGameStateAsync();
-            AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
-            AppDomain.CurrentDomain.FirstChanceException += async (sender, e) => await SaveGameStateAsync();
-            AppDomain.CurrentDomain.UnhandledException += async (sender, e) => await SaveGameStateAsync();
-            AppDomain.CurrentDomain.DomainUnload += async (sender, e) => await SaveGameStateAsync();
 
-
-            CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;
             Connected?.Invoke(this, new ConnectionChangedEventArgs(true));
-            CurrentSession.Items.ItemReceived += async (e) => await ReceiveItems(e);
-            await ReceiveExistingItems();
+
+            await ReceiveItems();
+
+            await SaveGameStateAsync();
             return;
         }
         public async void SendMessage(string message)
         {
             await CurrentSession.Socket.SendPacketAsync(new SayPacket() { Text = message });
-            
+
         }
         private async void HandleMessageReceived(LogMessage message)
         {
-            Log.Logger.Debug($"Message received");
+            Log.Debug($"Message received");
             MessageReceived?.Invoke(this, new MessageReceivedEventArgs(message));
         }
         public async void SendGoalCompletion()
         {
-            Log.Logger.Debug($"Sending Goal");
+            Log.Debug($"Sending Goal");
             if (IsConnected && IsLoggedIn)
             {
                 try
@@ -153,102 +158,94 @@ namespace Archipelago.Core
                 }
                 catch (Exception ex)
                 {
-                    Log.Logger.Error($"Could not send goal: {ex.Message}");
+                    Log.Error($"Could not send goal: {ex.Message}");
                 }
             }
             else
             {
-                Log.Logger.Error("Could not send goal: Not connected");
+                Log.Error("Could not send goal: Not connected");
             }
         }
-
-        private async Task ReceiveItems(ReceivedItemsHelper helper)
+        public async void CancelMonitors()
         {
-            Log.Logger.Debug($"Item Received");
-            if (!IsConnected) return;
-
-            var existingItems = GameState.ReceivedItems.ToDictionary(x => x.Id, x => x);
-
-            var newItemInfo = helper.PeekItem();
-
-            var item = new Item
-            {
-                Id = newItemInfo.ItemId,
-                Name = newItemInfo.ItemName,
-                Quantity = 1
-            };
-
-            if (GameState.ReceivedItems.Any(x => x.Id == item.Id))
-            {
-                Log.Logger.Debug($"Increasing received quantity");
-                GameState.ReceivedItems.First(x => x.Id == item.Id).Quantity++;
-            }
-            else
-            {
-                Log.Logger.Debug($"Adding to received items list");
-                GameState.ReceivedItems.Add(item);
-            }
-
-            ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
-            helper.DequeueItem();
-            await SaveGameStateAsync();
+            _cancellationTokenSource.Cancel();
+            _cancellationTokenSource = new CancellationTokenSource();
         }
-        private async Task ReceiveExistingItems()
+        private async Task ReceiveItems()
         {
-            Log.Logger.Debug($"Loading offline Items");
+            Log.Debug($"Item Received");
             if (!IsConnected) return;
 
-            var existingItems = GameState.ReceivedItems.ToDictionary(x => x.Id, x => x);
-            var handledItems = new List<Item>();
-
-            foreach (var newItem in CurrentSession.Items.AllItemsReceived)
+            if (GameState == null)
             {
-                var existingCount = (existingItems.TryGetValue(newItem.ItemId, out var existingItem) ? existingItem.Quantity : 0) + handledItems.Count(x => x.Id == newItem.ItemId);
-                var totalReceivedCount = CurrentSession.Items.AllItemsReceived.Count(x => x.ItemId == newItem.ItemId);
+                await LoadGameStateAsync();
+            }
+            var existingItems = GameState.ReceivedItems.ToDictionary(x => x.Id, x => x);
 
-                if (existingCount == 0 || existingCount < totalReceivedCount)
+            var newItemInfo = CurrentSession.Items.PeekItem();
+            while (newItemInfo != null)
+            {
+                var item = new Item
                 {
-                    var item = new Item
+                    Id = newItemInfo.ItemId,
+                    Name = newItemInfo.ItemName,
+                    Quantity = 1
+                };
+                if(existingItems.Any(x => x.Key == item.Id))
+                {
+                    if (!(existingItems.Where(x => x.Key == item.Id).Select(y => y.Value.Quantity).Sum() >= CurrentSession.Items.AllItemsReceived.Count(z => z.ItemId == item.Id)))
                     {
-                        Id = newItem.ItemId,
-                        Name = newItem.ItemName,
-                        Quantity = 1
-                    };
+                        if (GameState.ReceivedItems.Any(x => x.Id == item.Id))
+                        {
+                            Log.Debug($"Increasing received quantity");
+                            GameState.ReceivedItems.First(x => x.Id == item.Id).Quantity++;
+                        }
+                        else
+                        {
+                            Log.Debug($"Adding to received items list");
+                            GameState.ReceivedItems.Add(item);
+                        }
 
-                    if (existingCount > 0)
+                        ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
+                    }
+                    else 
+                    { 
+                        // Already have enough of this item
+                    }
+                }
+                else
+                {
+                    if (GameState.ReceivedItems.Any(x => x.Id == item.Id))
                     {
-                        Log.Logger.Debug($"Increasing received quantity");
+                        Log.Debug($"Increasing received quantity");
                         GameState.ReceivedItems.First(x => x.Id == item.Id).Quantity++;
                     }
                     else
                     {
-                        Log.Logger.Debug($"Adding to received items list");
+                        Log.Debug($"Adding to received items list");
                         GameState.ReceivedItems.Add(item);
                     }
 
                     ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
-                    handledItems.Add(item);
                 }
-                else
-                {
-                    Log.Logger.Debug($"Item already received");
-                }
+
+                CurrentSession.Items.DequeueItem();
+                newItemInfo = CurrentSession.Items.PeekItem();
             }
             await SaveGameStateAsync();
         }
-        public async void PopulateLocations(List<Location> locations)
+        public async Task PopulateLocations(List<Location> locations)
         {
             if (!IsConnected || CurrentSession == null)
             {
-                Log.Logger.Information("Ensure client is connected before populating locations!");
+                Log.Information("Ensure client is connected before populating locations!");
                 return;
             }
             Locations = locations;
-            Log.Logger.Debug($"Monitoring {locations.Count} locations");
-
+            Log.Debug($"Monitoring {locations.Count} locations");
             MonitorLocations(Locations);
 
-
+            return;
         }
         public async Task MonitorLocations(List<Location> locations)
         {
@@ -257,18 +254,19 @@ namespace Archipelago.Core
                 .GroupBy(x => x.Index / BATCH_SIZE)
                 .Select(g => g.Select(x => x.Location).ToList())
                 .ToList();
-            Log.Logger.Debug($"Created {locationBatches.Count} batches");
+            Log.Debug($"Created {locationBatches.Count} batches");
 
-            var tasks = locationBatches.Select(x => MonitorBatch(x));
+            var tasks = locationBatches.Select(x => MonitorBatch(x, _cancellationTokenSource.Token));
             await Task.WhenAll(tasks);
 
         }
-        private async Task MonitorBatch(List<Location> batch)
+        private async Task MonitorBatch(List<Location> batch, CancellationToken token)
         {
             List<Location> completed = new List<Location>();
 
             while (!batch.All(x => completed.Any(y => y.Id == x.Id)))
             {
+                if (token.IsCancellationRequested) return;
                 foreach (var location in batch)
                 {
                     var isCompleted = await Helpers.CheckLocation(location);
@@ -283,7 +281,7 @@ namespace Archipelago.Core
                     foreach (var location in completed)
                     {
                         SendLocation(location);
-                        Log.Logger.Information($"{location.Name} ({location.Id}) Completed");
+                        Log.Information($"{location.Name} ({location.Id}) Completed");
                         batch.Remove(location);
                     }
                 }
@@ -295,10 +293,10 @@ namespace Archipelago.Core
         {
             if (!(IsConnected))
             {
-                Log.Logger.Information("Must be connected and logged in to send locations.");
+                Log.Information("Must be connected and logged in to send locations.");
                 return;
             }
-            Log.Logger.Debug($"Marking location {location.Id} as complete");
+            Log.Debug($"Marking location {location.Id} as complete");
 
             await CurrentSession.Locations.CompleteLocationChecksAsync(new[] { (long)location.Id });
             GameState.CompletedLocations.Add(location);
@@ -306,9 +304,15 @@ namespace Archipelago.Core
 
         public async Task SaveGameStateAsync()
         {
-            if (!IsConnected || !IsLoggedIn || IsSaving) return;
-            IsSaving = true;
-            Log.Logger.Debug($"Saving game state");
+
+            Log.Debug($"Saving game state");
+
+            if (!await _saveSemaphore.WaitAsync(TimeSpan.FromMilliseconds(100)))
+            {
+                Log.Debug("Save operation already in progress");
+                return;
+            }
+
             try
             {
                 var fileName = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}.json";
@@ -318,31 +322,26 @@ namespace Archipelago.Core
 
                 using (var cts = new CancellationTokenSource(SaveLoadTimeoutMs))
                 using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
-                using (var streamWriter = new StreamWriter(fileStream))
-                using (var jsonWriter = new JsonTextWriter(streamWriter))
-                {
-                    var serializer = new JsonSerializer();
                     await Task.Run(() =>
                     {
-                        serializer.Serialize(jsonWriter, GameState);
+                        JsonSerializer.Serialize(fileStream, GameState);
                     }, cts.Token);
-                }
+
             }
             catch (Exception ex)
             {
-                Log.Logger.Information("Could not save Archipelago data: {0}", ex.Message);
-                Log.Logger.Debug($"{ex.StackTrace}", ex);
+                Log.Information("Could not save Archipelago data: {0}", ex.Message);
+                Log.Debug($"{ex.StackTrace}", ex);
             }
             finally
             {
-                IsSaving = false;
+                _saveSemaphore.Release();
             }
         }
 
         public async Task LoadGameStateAsync()
         {
-            if (!IsConnected || !IsLoggedIn) return;
-            Log.Logger.Debug($"Loading game state");
+            Log.Debug($"Loading game state");
 
             var fileName = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}.json";
             var filePath = Path.Combine(
@@ -356,30 +355,26 @@ namespace Archipelago.Core
                 {
                     using (var cts = new CancellationTokenSource(SaveLoadTimeoutMs))
                     using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true))
-                    using (var streamReader = new StreamReader(fileStream))
-                    using (var jsonReader = new JsonTextReader(streamReader))
-                    {
-                        var serializer = new JsonSerializer();
                         GameState = await Task.Run(() =>
                         {
-                            return serializer.Deserialize<GameState>(jsonReader);
+                            return JsonSerializer.Deserialize<GameState>(fileStream);
                         }, cts.Token);
-                    }
+
                     if (GameState == null) GameState = new GameState();
                 }
                 catch (OperationCanceledException)
                 {
-                    Log.Logger.Information("LoadGameState operation timed out.");
+                    Log.Information("LoadGameState operation timed out.");
                     GameState = new GameState();
                 }
                 catch (JsonException ex)
                 {
-                    Log.Logger.Information($"Cannot load saved data. JSON file is in an unexpected format: {ex.Message}");
+                    Log.Information($"Cannot load saved data. JSON file is in an unexpected format: {ex.Message}");
                     GameState = new GameState();
                 }
                 catch (Exception ex)
                 {
-                    Log.Logger.Information($"Error loading game state: {ex.Message}");
+                    Log.Information($"Error loading game state: {ex.Message}");
                     GameState = new GameState();
                 }
             }
