@@ -368,7 +368,18 @@ namespace Archipelago.Core.Util
             var output = converter.GetString(dataBuffer);
             return output;
         }
+		public static bool ReadBit(ulong address, int bitNum)
+        {
+			var readByte = ReadByte(address);
+			return GetBit(readByte, bitNum);
+        }
+		private static bool GetBit(byte b, int bitNumber)
+		{
+			if (bitNumber < 0 || bitNumber > 7)
+				throw new ArgumentOutOfRangeException(nameof(bitNumber), "Bit number must be between 0-7");
 
+			return (b & (1 << bitNumber)) != 0;
+		}
         public static bool Write(ulong address, byte[] value)
         {
             return WriteProcessMemory(GetProcessH(CurrentProcId), address, value, value.Length, out _);
