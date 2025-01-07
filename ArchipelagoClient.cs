@@ -180,8 +180,6 @@ namespace Archipelago.Core
             {
                 await LoadGameStateAsync();
             }
-            var existingItems = GameState.ReceivedItems.ToDictionary(x => x.Id, x => x);
-
             var newItemInfo = CurrentSession.Items.PeekItem();
             while (newItemInfo != null)
             {
@@ -191,41 +189,25 @@ namespace Archipelago.Core
                     Name = newItemInfo.ItemName,
                     Quantity = 1
                 };
-                if(existingItems.Any(x => x.Key == item.Id))
-                {
-                    if (!(existingItems.Where(x => x.Key == item.Id).Select(y => y.Value.Quantity).Sum() >= CurrentSession.Items.AllItemsReceived.Count(z => z.ItemId == item.Id)))
-                    {
-                        if (GameState.ReceivedItems.Any(x => x.Id == item.Id))
-                        {
-                            Log.Debug($"Increasing received quantity");
-                            GameState.ReceivedItems.First(x => x.Id == item.Id).Quantity++;
-                        }
-                        else
-                        {
-                            Log.Debug($"Adding to received items list");
-                            GameState.ReceivedItems.Add(item);
-                        }
 
+                var existingItem = GameState.ReceivedItems.FirstOrDefault(x => x.Id == item.Id);
+                var totalReceivedCount = CurrentSession.Items.AllItemsReceived.Count(z => z.ItemId == item.Id);
+
+                if (existingItem != null)
+                {
+                    var currentQuantity = GameState.ReceivedItems.Where(x => x.Id == item.Id).Sum(y => y.Quantity);
+                    if (currentQuantity < totalReceivedCount)
+                    {
+                        Log.Debug($"Increasing received quantity");
+                        existingItem.Quantity++;
                         ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
-                    }
-                    else 
-                    { 
-                        // Already have enough of this item
                     }
                 }
                 else
                 {
-                    if (GameState.ReceivedItems.Any(x => x.Id == item.Id))
-                    {
-                        Log.Debug($"Increasing received quantity");
-                        GameState.ReceivedItems.First(x => x.Id == item.Id).Quantity++;
-                    }
-                    else
-                    {
-                        Log.Debug($"Adding to received items list");
-                        GameState.ReceivedItems.Add(item);
-                    }
-
+                    Log.Debug($"Adding to received items list");
+                    // Item doesn't exist yet, add it
+                    GameState.ReceivedItems.Add(item);
                     ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
                 }
 
