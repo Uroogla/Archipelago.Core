@@ -41,13 +41,12 @@ namespace Archipelago.Core
         private readonly SemaphoreSlim _saveSemaphore = new SemaphoreSlim(1, 1);
 
         private const int BATCH_SIZE = 25;
+        private readonly object _lockObject = new object();
         private CancellationTokenSource _cancellationTokenSource { get; set; } = new CancellationTokenSource();
         public ArchipelagoClient(IGameClient gameClient)
         {
             Memory.CurrentProcId = gameClient.ProcId;
             AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
-            AppDomain.CurrentDomain.FirstChanceException += async (sender, e) => await SaveGameStateAsync();
-            AppDomain.CurrentDomain.UnhandledException += async (sender, e) => await SaveGameStateAsync();
             AppDomain.CurrentDomain.DomainUnload += async (sender, e) => await SaveGameStateAsync();
         }
         public async Task Connect(string host, string gameName)
@@ -132,7 +131,6 @@ namespace Archipelago.Core
 
             await ReceiveItems();
 
-            await SaveGameStateAsync();
             return;
         }
         public async void SendMessage(string message)
@@ -148,22 +146,16 @@ namespace Archipelago.Core
         public async void SendGoalCompletion()
         {
             Log.Debug($"Sending Goal");
-            if (IsConnected && IsLoggedIn)
+
+            try
             {
-                try
-                {
-                    var update = new StatusUpdatePacket();
-                    update.Status = ArchipelagoClientState.ClientGoal;
-                    CurrentSession.Socket.SendPacket(update);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"Could not send goal: {ex.Message}");
-                }
+                var update = new StatusUpdatePacket();
+                update.Status = ArchipelagoClientState.ClientGoal;
+                CurrentSession.Socket.SendPacket(update);
             }
-            else
+            catch (Exception ex)
             {
-                Log.Error("Could not send goal: Not connected");
+                Log.Error($"Could not send goal: {ex.Message}");
             }
         }
         public async void CancelMonitors()
@@ -174,45 +166,51 @@ namespace Archipelago.Core
         private async Task ReceiveItems()
         {
             Log.Debug($"Item Received");
-            if (!IsConnected) return;
-
             if (GameState == null)
             {
                 await LoadGameStateAsync();
             }
-            var newItemInfo = CurrentSession.Items.PeekItem();
-            while (newItemInfo != null)
+            lock (_lockObject)
             {
-                var item = new Item
+                var newItemInfo = CurrentSession.Items.PeekItem();
+                while (newItemInfo != null)
                 {
-                    Id = newItemInfo.ItemId,
-                    Name = newItemInfo.ItemName,
-                    Quantity = 1
-                };
-
-                var existingItem = GameState.ReceivedItems.FirstOrDefault(x => x.Id == item.Id);
-                var totalReceivedCount = CurrentSession.Items.AllItemsReceived.Count(z => z.ItemId == item.Id);
-
-                if (existingItem != null)
-                {
-                    var currentQuantity = GameState.ReceivedItems.Where(x => x.Id == item.Id).Sum(y => y.Quantity);
-                    if (currentQuantity < totalReceivedCount)
+                    var item = new Item
                     {
-                        Log.Debug($"Increasing received quantity");
-                        existingItem.Quantity++;
-                        ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
-                    }
-                }
-                else
-                {
-                    Log.Debug($"Adding to received items list");
-                    // Item doesn't exist yet, add it
-                    GameState.ReceivedItems.Add(item);
-                    ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
-                }
+                        Id = newItemInfo.ItemId,
+                        Name = newItemInfo.ItemName,
+                        Quantity = 1
+                    };
 
-                CurrentSession.Items.DequeueItem();
-                newItemInfo = CurrentSession.Items.PeekItem();
+                    var items = GameState.ReceivedItems.ToList();
+                    var existingItem = items.FirstOrDefault(x => x.Id == item.Id);
+                    var totalReceivedCount = CurrentSession.Items.AllItemsReceived.Count(z => z.ItemId == item.Id);
+
+                    if (existingItem != null)
+                    {
+                        var currentQuantity = items.Where(x => x.Id == item.Id).Sum(y => y.Quantity);
+                        while (currentQuantity < totalReceivedCount)
+                        {
+                            Log.Debug($"Increasing received quantity");
+                            existingItem.Quantity++;
+                            ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
+                            currentQuantity++;
+                        }
+                    }
+                    else
+                    {
+                        for (int i = 0; i < totalReceivedCount; i++)
+                        {
+                            Log.Debug($"Adding to received items list");
+                            // Item doesn't exist yet, add it
+                            GameState.ReceivedItems.Add(item);
+                            ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
+                        }
+                    }
+
+                    CurrentSession.Items.DequeueItem();
+                    newItemInfo = CurrentSession.Items.PeekItem();
+                }
             }
             await SaveGameStateAsync();
         }
@@ -273,7 +271,7 @@ namespace Archipelago.Core
         }
         public async void SendLocation(Location location)
         {
-            if (!(IsConnected))
+            if (CurrentSession == null)
             {
                 Log.Information("Must be connected and logged in to send locations.");
                 return;
@@ -286,7 +284,7 @@ namespace Archipelago.Core
 
         public async Task SaveGameStateAsync()
         {
-
+            if (CurrentSession == null) return;
             Log.Debug($"Saving game state");
 
             if (!await _saveSemaphore.WaitAsync(TimeSpan.FromMilliseconds(100)))
@@ -298,7 +296,7 @@ namespace Archipelago.Core
             try
             {
                 var fileName = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}.json";
-                var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
                 $"AP_{GameName}", fileName);
                 Directory.CreateDirectory(Path.GetDirectoryName(filePath));
 
@@ -327,7 +325,7 @@ namespace Archipelago.Core
 
             var fileName = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}.json";
             var filePath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
                 $"AP_{GameName}",
                 fileName);
 
