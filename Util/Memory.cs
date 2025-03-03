@@ -183,6 +183,131 @@ namespace Archipelago.Core.Util
             encoding ??= Encoding.UTF8;
             return encoding.GetString(dataBuffer);
         }
+
+        public static T ReadObject<T>(ulong baseAddress, Endianness endianness = Endianness.Little) where T : class, new()
+        {
+            var type = typeof(T);
+            var classOffset = type.GetCustomAttribute<MemoryOffsetAttribute>()?.Offset ?? 0;
+            return (T)ReadObjectInternal(type, baseAddress + classOffset, endianness);
+        }
+
+        private static object ReadObjectInternal(Type type, ulong baseAddress, Endianness endianness)
+        {
+            var result = Activator.CreateInstance(type);
+            var properties = type.GetProperties()
+                .Where(p => p.GetCustomAttribute<MemoryOffsetAttribute>() != null)
+                .ToList();
+
+            if (!properties.Any())
+            {
+                throw new ArgumentException($"Type {type.Name} must have at least one property decorated with {nameof(MemoryOffsetAttribute)}");
+            }
+
+            foreach (var property in properties)
+            {
+                var offset = property.GetCustomAttribute<MemoryOffsetAttribute>().Offset;
+                var address = baseAddress + offset;
+
+                if (property.PropertyType.IsGenericType &&
+                    (property.PropertyType.GetGenericTypeDefinition() == typeof(List<>) ||
+                     property.PropertyType.GetGenericTypeDefinition() == typeof(IList<>) ||
+                     property.PropertyType.GetGenericTypeDefinition() == typeof(ICollection<>)))
+                {
+                    var attribute = property.GetCustomAttribute<MemoryOffsetAttribute>();
+                    if (attribute.CollectionLength <= 0)
+                    {
+                        throw new ArgumentException($"Collection property {property.Name} must specify a positive CollectionLength");
+                    }
+
+                    var elementType = property.PropertyType.GetGenericArguments()[0];
+                    var listType = typeof(List<>).MakeGenericType(elementType);
+                    var list = (System.Collections.IList)Activator.CreateInstance(listType);
+
+                    var elementSize = GetElementSize(elementType);
+
+                    for (int i = 0; i < attribute.CollectionLength; i++)
+                    {
+                        var elementAddress = address + (ulong)(i * elementSize);
+                        if (!IsBuiltInType(elementType))
+                        {
+                            var element = ReadObjectInternal(elementType, elementAddress, endianness);
+                            list.Add(element);
+                        }
+                        else
+                        {
+                            var element = ReadPropertyValue(elementAddress, property, endianness);
+                            list.Add(element);
+                        }
+                    }
+
+                    property.SetValue(result, list);
+                }
+                else if (!IsBuiltInType(property.PropertyType))
+                {
+                    var nestedObject = ReadObjectInternal(property.PropertyType, address, endianness);
+                    property.SetValue(result, nestedObject);
+                }
+                else
+                {
+                    var value = ReadPropertyValue(address, property, endianness);
+                    property.SetValue(result, value);
+                }
+            }
+
+            return result;
+        }
+        private static object ReadPropertyValue(ulong address, PropertyInfo property, Endianness endianness)
+        {
+            var propertyType = property.PropertyType;
+            var attribute = property.GetCustomAttribute<MemoryOffsetAttribute>();
+
+            if (propertyType == typeof(string))
+            {
+                return ReadString(address, attribute.StringLength, endianness);
+            }
+            else if (propertyType == typeof(byte))
+            {
+                return ReadByte(address);
+            }
+            else if (propertyType == typeof(short))
+            {
+                return ReadShort(address, endianness);
+            }
+            else if (propertyType == typeof(ushort))
+            {
+                return ReadUShort(address, endianness);
+            }
+            else if (propertyType == typeof(int))
+            {
+                return ReadInt(address, endianness);
+            }
+            else if (propertyType == typeof(uint))
+            {
+                return ReadUInt(address, endianness);
+            }
+            else if (propertyType == typeof(long))
+            {
+                return ReadLong(address, endianness);
+            }
+            else if (propertyType == typeof(ulong))
+            {
+                return ReadULong(address, endianness);
+            }
+            else if (propertyType == typeof(float))
+            {
+                return ReadFloat(address, endianness);
+            }
+            else if (propertyType == typeof(double))
+            {
+                return ReadDouble(address, endianness);
+            }
+            else if (propertyType == typeof(bool))
+            {
+                return ReadBit(address, 0, endianness);
+            }
+
+            throw new NotSupportedException($"Type {propertyType.Name} is not supported for memory reading");
+        }
         #endregion
 
         #region Write Operations
@@ -282,6 +407,122 @@ namespace Archipelago.Core.Util
 
             return WriteByte(address, currentByte);
         }
+
+        public static bool WriteObject<T>(ulong baseAddress, T obj, Endianness endianness = Endianness.Little) where T : class
+        {
+            var type = typeof(T);
+            var classOffset = type.GetCustomAttribute<MemoryOffsetAttribute>()?.Offset ?? 0;
+            return WriteObjectInternal(type, baseAddress + classOffset, obj, endianness);
+        }
+
+        private static bool WriteObjectInternal(Type type, ulong baseAddress, object obj, Endianness endianness)
+        {
+            var properties = type.GetProperties()
+                .Where(p => p.GetCustomAttribute<MemoryOffsetAttribute>() != null)
+                .ToList();
+
+            if (!properties.Any())
+            {
+                throw new ArgumentException($"Type {type.Name} must have at least one property decorated with {nameof(MemoryOffsetAttribute)}");
+            }
+
+            bool success = true;
+            foreach (var property in properties)
+            {
+                var offset = property.GetCustomAttribute<MemoryOffsetAttribute>().Offset;
+                var address = baseAddress + offset;
+
+                var value = property.GetValue(obj);
+                if (value == null) continue;
+
+                if (property.PropertyType.IsGenericType &&
+                    (property.PropertyType.GetGenericTypeDefinition() == typeof(List<>) ||
+                     property.PropertyType.GetGenericTypeDefinition() == typeof(IList<>) ||
+                     property.PropertyType.GetGenericTypeDefinition() == typeof(ICollection<>)))
+                {
+                    var list = (System.Collections.IList)value;
+                    var elementType = property.PropertyType.GetGenericArguments()[0];
+                    var elementSize = GetElementSize(elementType);
+
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        var elementAddress = address + (ulong)(i * elementSize);
+                        if (!IsBuiltInType(elementType))
+                        {
+                            success &= WriteObjectInternal(elementType, elementAddress, list[i], endianness);
+                        }
+                        else
+                        {
+                            success &= WritePropertyValue(elementAddress, property, list[i], endianness);
+                        }
+                    }
+                }
+                else if (!IsBuiltInType(property.PropertyType))
+                {
+                    success &= WriteObjectInternal(property.PropertyType, address, value, endianness);
+                }
+                else
+                {
+                    success &= WritePropertyValue(address, property, value, endianness);
+                }
+            }
+
+            return success;
+        }
+        private static bool WritePropertyValue(ulong address, PropertyInfo property, object value, Endianness endianness)
+        {
+            if (value == null) return true;
+
+            var propertyType = property.PropertyType;
+            var attribute = property.GetCustomAttribute<MemoryOffsetAttribute>();
+
+            if (propertyType == typeof(string))
+            {
+                return WriteString(address, (string)value, endianness);
+            }
+            else if (propertyType == typeof(byte))
+            {
+                return WriteByte(address, (byte)value);
+            }
+            else if (propertyType == typeof(short))
+            {
+                return Write(address, (short)value, endianness);
+            }
+            else if (propertyType == typeof(ushort))
+            {
+                return Write(address, (ushort)value, endianness);
+            }
+            else if (propertyType == typeof(int))
+            {
+                return Write(address, (int)value, endianness);
+            }
+            else if (propertyType == typeof(uint))
+            {
+                return Write(address, (uint)value, endianness);
+            }
+            else if (propertyType == typeof(long))
+            {
+                return Write(address, (long)value, endianness);
+            }
+            else if (propertyType == typeof(ulong))
+            {
+                return Write(address, (ulong)value, endianness);
+            }
+            else if (propertyType == typeof(float))
+            {
+                return Write(address, (float)value, endianness);
+            }
+            else if (propertyType == typeof(double))
+            {
+                return Write(address, (double)value, endianness);
+            }
+            else if (propertyType == typeof(bool))
+            {
+                return WriteBit(address, 0, (bool)value, endianness);
+            }
+
+            throw new NotSupportedException($"Type {propertyType.Name} is not supported for memory writing");
+        }
         #endregion
 
         #region Memory Operations
@@ -375,6 +616,46 @@ namespace Archipelago.Core.Util
         #endregion
 
         #region Utilities
+        public static byte[] ReadFromPointer(ulong ptrAddress, int length, int depth)
+        {
+            var next = ReadByteArray(ptrAddress, length);
+            if (--depth == 0)
+                return next;
+            return ReadFromPointer(BitConverter.ToUInt32(next), length, depth);
+        }
+        public static Task MonitorAddressForAction<T>(ulong address, Action action, Func<T, bool> criteria)
+        {
+            int size = GetElementSize(typeof(T));
+            var initialValue = ConvertByteArrayToT<T>(Memory.ReadByteArray(address, size));
+            return Task.Run(async () =>
+            {
+                var value = initialValue;
+                while (!criteria(value))
+                {
+                    value = ConvertByteArrayToT<T>(Memory.ReadByteArray(address, size));
+                    await Task.Delay(10);
+                }
+                action();
+            });
+        }
+        public static Task MonitorAddressBitForAction(ulong address, int bitNum, Action action)
+        {
+            var initialValue = ReadBit(address, bitNum);
+            return Task.Run(async () =>
+            {
+                var value = initialValue;
+                while (!value)
+                {
+                    value = ReadBit(address, bitNum);
+                    await Task.Delay(10);
+                }
+                action();
+            });
+        }
+        private static bool IsBuiltInType(Type type)
+        {
+            return type.IsPrimitive || type == typeof(string) || type == typeof(decimal);
+        }
         private static byte[] HandleEndianness(byte[] data, Endianness endianness)
         {
             if (endianness == Endianness.Big && BitConverter.IsLittleEndian ||
@@ -383,6 +664,44 @@ namespace Archipelago.Core.Util
                 Array.Reverse(data);
             }
             return data;
+        }
+        private static T ConvertByteArrayToT<T>(byte[] bytes)
+        {
+            if (typeof(T) == typeof(byte)) return (T)(object)bytes[0];
+            if (typeof(T) == typeof(short)) return (T)(object)BitConverter.ToInt16(bytes, 0);
+            if (typeof(T) == typeof(ushort)) return (T)(object)BitConverter.ToUInt16(bytes, 0);
+            if (typeof(T) == typeof(int)) return (T)(object)BitConverter.ToInt32(bytes, 0);
+            if (typeof(T) == typeof(uint)) return (T)(object)BitConverter.ToUInt32(bytes, 0);
+            if (typeof(T) == typeof(long)) return (T)(object)BitConverter.ToInt64(bytes, 0);
+            if (typeof(T) == typeof(ulong)) return (T)(object)BitConverter.ToUInt64(bytes, 0);
+            if (typeof(T) == typeof(float)) return (T)(object)BitConverter.ToSingle(bytes, 0);
+            if (typeof(T) == typeof(double)) return (T)(object)BitConverter.ToDouble(bytes, 0);
+
+            // For other types, you might need to use a more complex deserialization method
+            throw new NotSupportedException($"Type {typeof(T)} is not supported for conversion from byte array.");
+        }
+        private static int GetElementSize(Type type)
+        {
+            if (type == typeof(byte)) return 1;
+            if (type == typeof(short) || type == typeof(ushort)) return 2;
+            if (type == typeof(int) || type == typeof(uint) || type == typeof(float)) return 4;
+            if (type == typeof(long) || type == typeof(ulong) || type == typeof(double)) return 8;
+
+            // For complex types, get size by checking their properties' offsets and sizes
+            var properties = type.GetProperties()
+                .Where(p => p.GetCustomAttribute<MemoryOffsetAttribute>() != null)
+                .ToList();
+
+            if (!properties.Any()) return 0;
+
+            var lastProperty = properties.OrderByDescending(p =>
+            {
+                var attr = p.GetCustomAttribute<MemoryOffsetAttribute>();
+                return attr.Offset + GetElementSize(p.PropertyType) * Math.Max(1, attr.CollectionLength);
+            }).First();
+
+            var lastAttr = lastProperty.GetCustomAttribute<MemoryOffsetAttribute>();
+            return (int)(lastAttr.Offset + GetElementSize(lastProperty.PropertyType) * Math.Max(1, lastAttr.CollectionLength));
         }
         #endregion
     }
