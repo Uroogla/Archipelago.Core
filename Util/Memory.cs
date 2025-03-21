@@ -43,7 +43,7 @@ namespace Archipelago.Core.Util
 
         #region Process Management
         public static int CurrentProcId { get; set; }
-
+        public static ulong GlobalOffset { get; set; } = 0;
         internal static IntPtr GetProcessH(int proc)
         {
             return PlatformImpl.OpenProcess(PROCESS_VM_OPERATION | PROCESS_SUSPEND_RESUME | PROCESS_VM_READ | PROCESS_VM_WRITE, false, proc);
@@ -98,14 +98,14 @@ namespace Archipelago.Core.Util
         public static byte ReadByte(ulong address)
         {
             byte[] buffer = new byte[1];
-            PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), address, buffer, buffer.Length, out _);
+            PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, buffer, buffer.Length, out _);
             return buffer[0];
         }
 
         public static byte[] ReadByteArray(ulong address, int length, Endianness endianness = Endianness.Little)
         {
             byte[] buffer = new byte[length];
-            PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), address, buffer, buffer.Length, out _);
+            PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, buffer, buffer.Length, out _);
             if (endianness == Endianness.Big && BitConverter.IsLittleEndian ||
                 endianness == Endianness.Little && !BitConverter.IsLittleEndian)
             {
@@ -198,7 +198,7 @@ namespace Archipelago.Core.Util
                 .Where(p => p.GetCustomAttribute<MemoryOffsetAttribute>() != null)
                 .ToList();
 
-            if (!properties.Any())
+            if (properties.Count == 0)
             {
                 throw new ArgumentException($"Type {type.Name} must have at least one property decorated with {nameof(MemoryOffsetAttribute)}");
             }
@@ -313,7 +313,7 @@ namespace Archipelago.Core.Util
         #region Write Operations
         public static bool Write(ulong address, byte[] value)
         {
-            return PlatformImpl.WriteProcessMemory(GetProcessH(CurrentProcId), address, value, value.Length, out _);
+            return PlatformImpl.WriteProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, value, value.Length, out _);
         }
 
         public static bool WriteString(ulong address, string value, Endianness endianness = Endianness.Little, Encoding encoding = null)
@@ -421,7 +421,7 @@ namespace Archipelago.Core.Util
                 .Where(p => p.GetCustomAttribute<MemoryOffsetAttribute>() != null)
                 .ToList();
 
-            if (!properties.Any())
+            if (properties.Count == 0)
             {
                 throw new ArgumentException($"Type {type.Name} must have at least one property decorated with {nameof(MemoryOffsetAttribute)}");
             }
@@ -528,14 +528,12 @@ namespace Archipelago.Core.Util
         #region Memory Operations
         public static bool FreezeAddress(ulong address, int length)
         {
-            uint oldProtect;
-            return PlatformImpl.VirtualProtectEx(GetProcessH(CurrentProcId), (IntPtr)address, (IntPtr)length, PAGE_READONLY, out oldProtect);
+            return PlatformImpl.VirtualProtectEx(GetProcessH(CurrentProcId), (IntPtr)address, (IntPtr)length, PAGE_READONLY, out var oldProtect);
         }
 
         public static bool UnfreezeAddress(ulong address, int length)
         {
-            uint oldProtect;
-            return PlatformImpl.VirtualProtectEx(GetProcessH(CurrentProcId), (IntPtr)address, (IntPtr)length, PAGE_READWRITE, out oldProtect);
+            return PlatformImpl.VirtualProtectEx(GetProcessH(CurrentProcId), (IntPtr)address, (IntPtr)length, PAGE_READWRITE, out var oldProtect);
         }
 
         public static IntPtr Allocate(uint size, uint flProtect = PAGE_READWRITE)
@@ -553,9 +551,8 @@ namespace Archipelago.Core.Util
         public static IntPtr FindSignature(IntPtr start, int size, byte[] pattern, string mask)
         {
             byte[] buffer = new byte[size];
-            IntPtr bytesRead;
 
-            PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), (ulong)start, buffer, size, out bytesRead);
+            PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), (ulong)start, buffer, size, out var bytesRead);
 
             for (int i = 0; i < size - pattern.Length; i++)
             {
@@ -692,7 +689,7 @@ namespace Archipelago.Core.Util
                 .Where(p => p.GetCustomAttribute<MemoryOffsetAttribute>() != null)
                 .ToList();
 
-            if (!properties.Any()) return 0;
+            if (properties.Count == 0) return 0;
 
             var lastProperty = properties.OrderByDescending(p =>
             {

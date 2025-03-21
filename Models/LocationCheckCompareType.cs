@@ -11,6 +11,6 @@ namespace Archipelago.Core.Models
         Match = 0,
         GreaterThan = 1,
         LessThan = 2,
-        Range = 3
+        Range = 3,       
     }
 }

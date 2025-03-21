@@ -125,9 +125,8 @@ namespace Archipelago.Core.Util
         #region Module Information
         public MODULEINFO GetModuleInfo(IntPtr processHandle, string moduleName)
         {
-            MODULEINFO moduleInfo = new MODULEINFO();
             IntPtr moduleHandle = GetModuleHandle(moduleName);
-            GetModuleInformation_Win32(processHandle, moduleHandle, out moduleInfo, (uint)Marshal.SizeOf(typeof(MODULEINFO)));
+            GetModuleInformation_Win32(processHandle, moduleHandle, out var moduleInfo, (uint)Marshal.SizeOf(typeof(MODULEINFO)));
             return moduleInfo;
         }
 
@@ -163,8 +162,7 @@ namespace Archipelago.Core.Util
 
             try
             {
-                IntPtr bytesWritten;
-                if (!WriteProcessMemory(processHandle, (ulong)address, bytes, bytes.Length, out bytesWritten))
+                if (!WriteProcessMemory(processHandle, (ulong)address, bytes, bytes.Length, out nint bytesWritten))
                 {
                     Console.WriteLine($"Failed to write bytes to memory: {GetLastErrorMessage()}");
                     VirtualFreeEx(processHandle, address, IntPtr.Zero, MEM_RELEASE);

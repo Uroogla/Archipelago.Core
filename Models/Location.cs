@@ -20,5 +20,7 @@ namespace Archipelago.Core.Models
         public LocationCheckType CheckType { get; set; }
         public string CheckValue { get; set; }
         public LocationCheckCompareType CompareType { get; set; }
+        public string RangeStartValue { get; set; }
+        public string RangeEndValue { get; set; }
     }
 }

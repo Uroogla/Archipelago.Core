@@ -29,7 +29,7 @@ namespace Archipelago.Core.Util.Overlay
         private const uint SWP_NOACTIVATE = 0x0010;
 
         // Window positions
-        private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        private static readonly IntPtr HWND_TOPMOST = new(-1);
 
         // Window messages
         private const int WM_PAINT = 0x000F;
@@ -98,8 +98,8 @@ namespace Archipelago.Core.Util.Overlay
         private IntPtr _targetWindow;
         private Thread _renderThread;
         private volatile bool _isRunning;
-        private readonly List<TextPopup> _popups = new List<TextPopup>();
-        private readonly object _popupsLock = new object();
+        private readonly List<TextPopup> _popups = [];
+        private readonly object _popupsLock = new();
         private readonly string _className;
 
         public WindowsOverlayService()
@@ -131,20 +131,13 @@ namespace Archipelago.Core.Util.Overlay
 
         private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
         {
-            switch (msg)
+            return msg switch
             {
-                case WM_PAINT:
-                    // Handled by our render thread
-                    return IntPtr.Zero;
-                case WM_ERASEBKGND:
-                    // Prevent erasing to reduce flicker
-                    return new IntPtr(1);
-                case WM_NCHITTEST:
-                    // Make the window click-through
-                    return new IntPtr(HTTRANSPARENT);
-                default:
-                    return DefWindowProc(hWnd, msg, wParam, lParam);
-            }
+                WM_PAINT => IntPtr.Zero,// Handled by our render thread
+                WM_ERASEBKGND => new IntPtr(1),// Prevent erasing to reduce flicker
+                WM_NCHITTEST => new IntPtr(HTTRANSPARENT),// Make the window click-through
+                _ => DefWindowProc(hWnd, msg, wParam, lParam),
+            };
         }
         public bool AttachToWindow(IntPtr targetWindowHandle)
         {
@@ -292,7 +285,7 @@ namespace Archipelago.Core.Util.Overlay
 
                             // Draw background
                             int padding = popup.Padding;
-                            using (SolidBrush backBrush = new SolidBrush(popup.BackgroundColor))
+                            using (SolidBrush backBrush = new(popup.BackgroundColor))
                             {
                                 g.FillRoundedRectangle(
                                     backBrush,
@@ -304,25 +297,22 @@ namespace Archipelago.Core.Util.Overlay
                             }
 
                             // Draw text
-                            using (SolidBrush textBrush = new SolidBrush(popup.TextColor))
-                            {
-                                g.DrawString(
-                                    popup.Text,
-                                    popup.Font,
-                                    textBrush,
-                                    popup.Position.X + padding,
-                                    popup.Position.Y + padding);
-                            }
+                            using SolidBrush textBrush = new(popup.TextColor);
+                            g.DrawString(popup.Text,
+                                         popup.Font,
+                                         textBrush,
+                                         popup.Position.X + padding,
+                                         popup.Position.Y + padding);
                         }
                     }
                 }
 
                 // Update layered window
-                POINT sourceLocation = new POINT(0, 0);
-                POINT destLocation = new POINT(rect.Left, rect.Top);
-                SIZE size = new SIZE(width, height);
+                POINT sourceLocation = new(0, 0);
+                POINT destLocation = new(rect.Left, rect.Top);
+                SIZE size = new(width, height);
 
-                BLENDFUNCTION blend = new BLENDFUNCTION
+                BLENDFUNCTION blend = new()
                 {
                     BlendOp = 0, // AC_SRC_OVER
                     BlendFlags = 0,

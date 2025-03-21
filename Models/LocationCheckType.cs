@@ -11,6 +11,10 @@ namespace Archipelago.Core.Models
         Bit = 0,
         Int = 1,
         UInt = 2,
-        Byte = 3
+        Byte = 3,
+        Short = 4,
+        FalseBit = 5,
+        Long = 6,
+
     }
 }

@@ -5,8 +5,6 @@ VisualStudioVersion = 17.9.34701.34
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Archipelago.Core", "Archipelago.Core.csproj", "{254957F8-672D-44E2-974D-1B9635647F65}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Archipelago.Bizhawk", "..\Archipelago.Bizhawk\Archipelago.Bizhawk.csproj", "{1D967520-E04E-4926-ABB6-E8672D6BC850}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Archipelago.ClientTest", "..\Archipelago.ClientTest\Archipelago.ClientTest.csproj", "{647881BB-FF1D-456D-961C-7869D48DDC4B}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Archipelago.Core.GUI", "..\Archipelago.Core.GUI\Archipelago.Core.GUI.csproj", "{6A86CFAE-AE9C-4CEA-A03B-DCDFF872F366}"
@@ -21,10 +19,6 @@ Global
 		{254957F8-672D-44E2-974D-1B9635647F65}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{254957F8-672D-44E2-974D-1B9635647F65}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{254957F8-672D-44E2-974D-1B9635647F65}.Release|Any CPU.Build.0 = Release|Any CPU
-		{1D967520-E04E-4926-ABB6-E8672D6BC850}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{1D967520-E04E-4926-ABB6-E8672D6BC850}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{1D967520-E04E-4926-ABB6-E8672D6BC850}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{1D967520-E04E-4926-ABB6-E8672D6BC850}.Release|Any CPU.Build.0 = Release|Any CPU
 		{647881BB-FF1D-456D-961C-7869D48DDC4B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{647881BB-FF1D-456D-961C-7869D48DDC4B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{647881BB-FF1D-456D-961C-7869D48DDC4B}.Release|Any CPU.ActiveCfg = Release|Any CPU
