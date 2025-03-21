@@ -14,15 +14,11 @@ This guide covers the usage of Archipelago NuGet packages for integrating game e
 ## Available Packages
 
  - Archipelago.Core: Contains most of the core functionality
- - Archipelago.PCSX2: Implementation for PCSX2 emulator
- - Archipelago.ePSXe: Implementation for ePSXe emulator
- - Archipelago.Xenia: Implementation for Xenia emulator
- - Archipelago.BizHawk: Implementation for BizHawk emulator
+ - Archipelago.MauiGUI: Contains a GUI interface written in MAUI.
 
 ## Installation
 
-Install the Archipelago.Core NuGet package
-Install the specific client package for your emulator (e.g., Archipelago.PCSX2, Archipelago.ePSXe)
+Install the Archipelago.Core NuGet package OR Install the MauiGui package directly (Which contains the Core package)
 
 ## Basic Usage
 ### Creating a Game Client
@@ -48,10 +44,10 @@ archipelagoClient.Login("Player1", "Password");
 To set up location tracking:
 
 Create a collection of Location objects
-Call PopulateLocations after connecting:
+Call MonitorLocations after connecting:
 
 ``` 
-archipelagoClient.PopulateLocations(myLocations);
+archipelagoClient.MonitorLocations(myLocations);
  ```  
 
 ## Location Object Properties
