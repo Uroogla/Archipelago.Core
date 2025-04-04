@@ -253,7 +253,6 @@ namespace Archipelago.Core
             await Task.WhenAll(tasks);
 
         }
-        [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
         public void AddOverlayMessage(string message, TimeSpan? duration = null, CancellationToken cancellationToken = default)
         {
             if (isOverlayEnabled)
