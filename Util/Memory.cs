@@ -191,7 +191,7 @@ namespace Archipelago.Core.Util
             return (T)ReadObjectInternal(type, baseAddress + classOffset, endianness);
         }
 
-        private static object ReadObjectInternal(Type type, ulong baseAddress, Endianness endianness)
+        internal static object ReadObjectInternal(Type type, ulong baseAddress, Endianness endianness)
         {
             var result = Activator.CreateInstance(type);
             var properties = type.GetProperties()
@@ -255,6 +255,26 @@ namespace Archipelago.Core.Util
             }
 
             return result;
+        }
+        public static T Read<T>(ulong address, Endianness endianness) where T : struct
+        {
+            object result = typeof(T) switch
+            {
+                Type t when t == typeof(byte) => ReadByte(address),
+                Type t when t == typeof(short) => ReadShort(address, endianness),
+                Type t when t == typeof(ushort) => ReadUShort(address, endianness),
+                Type t when t == typeof(int) => ReadInt(address, endianness),
+                Type t when t == typeof(uint) => ReadUInt(address, endianness),
+                Type t when t == typeof(long) => ReadLong(address, endianness),
+                Type t when t == typeof(ulong) => ReadULong(address, endianness),
+                Type t when t == typeof(float) => ReadFloat(address, endianness),
+                Type t when t == typeof(double) => ReadDouble(address, endianness),
+                Type t when t == typeof(bool) => ReadBit(address, 0, endianness),
+                Type t when t == typeof(string) => throw new NotSupportedException("Cannot Read type string with Read<T>, use ReadString instead"),
+                _ => throw new NotSupportedException($"Type {typeof(T).Name} is not supported for memory reading")
+            };
+
+            return (T)result;
         }
         private static object ReadPropertyValue(ulong address, PropertyInfo property, Endianness endianness)
         {

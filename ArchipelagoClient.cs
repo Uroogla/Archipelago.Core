@@ -31,6 +31,7 @@ namespace Archipelago.Core
         private IOverlayService? OverlayService { get; set; }
 
         private readonly SemaphoreSlim _fileOperationSemaphore = new(1, 1);
+        private bool isOverlayEnabled = false;
 
         private const int BATCH_SIZE = 25;
         private readonly object _lockObject = new object();
@@ -39,9 +40,13 @@ namespace Archipelago.Core
         {
             Memory.CurrentProcId = gameClient.ProcId;
             AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
-            AppDomain.CurrentDomain.DomainUnload += async (sender, e) => await SaveGameStateAsync();
-            //    overlayService = new WindowsOverlayService();
-            //     overlayService.AttachToWindow(Memory.GetCurrentProcess().MainWindowHandle);
+        }
+        public void IntializeOverlayService(IOverlayService overlayService)
+        {
+            OverlayService = overlayService;
+            OverlayService.AttachToWindow(Memory.GetCurrentProcess().MainWindowHandle);
+            OverlayService.Show();
+            isOverlayEnabled = true;
         }
         public async Task Connect(string host, string gameName, CancellationToken cancellationToken = default)
         {
@@ -175,6 +180,7 @@ namespace Archipelago.Core
             await LoadGameStateAsync(cancellationToken);
 
             var newItemInfo = CurrentSession.Items.PeekItem();
+            var itemsToAdd = new List<Item>();
             while (newItemInfo != null)
             {
                 var item = new Item
@@ -201,14 +207,17 @@ namespace Archipelago.Core
                 {
                     Log.Debug($"Adding new item {item.Name} with quantity {totalReceivedCount}");
                     item.Quantity = totalReceivedCount;
-                    GameState.ReceivedItems.Add(item);
-                    ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
+                    itemsToAdd.Add(item);
                 }
 
                 CurrentSession.Items.DequeueItem();
                 newItemInfo = CurrentSession.Items.PeekItem();
             }
-
+            foreach (var item in itemsToAdd)
+            {
+                GameState.ReceivedItems.Add(item);
+                ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
+            }
             if (!cancellationToken.IsCancellationRequested)
             {
                 await SaveGameStateAsync(cancellationToken);
@@ -247,10 +256,12 @@ namespace Archipelago.Core
         [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
         public void AddOverlayMessage(string message, TimeSpan? duration = null, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
-            cancellationToken = CombineTokens(cancellationToken);
-            if (!duration.HasValue) duration = TimeSpan.FromSeconds(5);
-            OverlayService.AddTextPopup(message, 100, 100, System.Drawing.Color.Black, duration.Value.TotalSeconds);
+            if (isOverlayEnabled)
+            {
+                cancellationToken = CombineTokens(cancellationToken);
+                if (!duration.HasValue) duration = TimeSpan.FromSeconds(5);
+                OverlayService.AddTextPopup(message, new Util.Overlay.Color(0, 0, 0), duration.Value.TotalSeconds);
+            }
         }
         private async Task MonitorBatch(List<Location> batch, CancellationToken token)
         {
@@ -409,7 +420,8 @@ namespace Archipelago.Core
             {
                 Disconnect();
             }
-
+            OverlayService.Hide();
+            OverlayService.Dispose();
             _cancellationTokenSource.Dispose();
             _fileOperationSemaphore.Dispose();
 

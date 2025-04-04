@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using static Archipelago.Core.Util.Enums;
 
 namespace Archipelago.Core.Util
 {
@@ -160,6 +161,25 @@ namespace Archipelago.Core.Util
                     return false;
             }
             return false;
+        }
+        public static ulong ResolvePointer(ulong address, params ulong[] offsets)
+        {
+            var currentAddress = address;
+            for (int i = 0; i < offsets.Length - 1; i++)
+            {
+                currentAddress = currentAddress + offsets[i];
+                currentAddress = Memory.ReadULong(currentAddress);
+            }
+            if (offsets.Length > 0)
+            {
+                currentAddress = currentAddress + offsets[offsets.Length - 1];
+            }
+            return currentAddress;
+        }
+        public static T ResolvePointer<T>(ulong address, Endianness endianness = Endianness.Little, params ulong[] offsets) where T: struct
+        {
+            var lastAddress = ResolvePointer(address, offsets);
+            return Memory.Read<T>(lastAddress, endianness);
         }
         private static bool GetBitValue(byte value, int bitIndex)
         {

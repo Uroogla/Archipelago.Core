@@ -1,355 +1,286 @@
-﻿using System;
+﻿using GameOverlay.Drawing;
+using GameOverlay.Windows;
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
-using static Archipelago.Core.Util.Overlay.Structs;
+
 namespace Archipelago.Core.Util.Overlay
 {
     public class WindowsOverlayService : IOverlayService
     {
-        // Window styles
-        private const int WS_EX_LAYERED = 0x80000;
-        private const int WS_EX_TRANSPARENT = 0x20;
-        private const uint WS_POPUP = 0x80000000;
-        private const int GWL_EXSTYLE = -20;
+        private readonly StickyWindow _window;
+        private readonly Dictionary<string, SolidBrush> _brushes = new Dictionary<string, SolidBrush>();
+        private readonly Dictionary<float, Font> _fonts = new Dictionary<float, Font>();
+        private readonly ConcurrentDictionary<Guid, TextPopup> _popups = new ConcurrentDictionary<Guid, TextPopup>();
 
-        // Layered window attributes
-        private const int LWA_ALPHA = 0x2;
-        private const int LWA_COLORKEY = 0x1;
-
-        // SetWindowPos flags
-        private const uint SWP_NOSIZE = 0x0001;
-        private const uint SWP_NOMOVE = 0x0002;
-        private const uint SWP_SHOWWINDOW = 0x0040;
-        private const uint SWP_NOACTIVATE = 0x0010;
-
-        // Window positions
-        private static readonly IntPtr HWND_TOPMOST = new(-1);
-
-        // Window messages
-        private const int WM_PAINT = 0x000F;
-        private const int WM_ERASEBKGND = 0x0014;
-        private const int WM_NCHITTEST = 0x0084;
-        private const int HTTRANSPARENT = -1;
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr CreateWindowEx(
-            int dwExStyle, string lpClassName, string lpWindowName, uint dwStyle,
-            int x, int y, int nWidth, int nHeight, IntPtr hWndParent, IntPtr hMenu,
-            IntPtr hInstance, IntPtr lpParam);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool DestroyWindow(IntPtr hWnd);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst,
-        ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc, ref POINT pptSrc,
-        uint crKey, ref BLENDFUNCTION pblend, uint dwFlags);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-
-        [DllImport("user32.dll")]
-        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
-            int X, int Y, int cx, int cy, uint uFlags);
-
-        [DllImport("user32.dll")]
-        private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr GetDC(IntPtr hWnd);
-
-        [DllImport("user32.dll")]
-        private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
-
-        [DllImport("gdi32.dll")]
-        private static extern IntPtr CreateCompatibleDC(IntPtr hDC);
-
-        [DllImport("gdi32.dll")]
-        private static extern bool DeleteDC(IntPtr hDC);
-
-        [DllImport("gdi32.dll")]
-        private static extern IntPtr CreateCompatibleBitmap(IntPtr hDC, int nWidth, int nHeight);
-
-        [DllImport("gdi32.dll")]
-        private static extern IntPtr SelectObject(IntPtr hDC, IntPtr hObject);
-
-        [DllImport("gdi32.dll")]
-        private static extern bool DeleteObject(IntPtr hObject);
-
-        [DllImport("user32.dll")]
-        private static extern bool RegisterClassEx(ref WNDCLASSEX lpwcx);
-
-        [DllImport("kernel32.dll")]
-        private static extern IntPtr GetModuleHandle(string lpModuleName);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr DefWindowProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
-
-        private IntPtr _overlayWindow;
-        private IntPtr _targetWindow;
-        private Thread _renderThread;
-        private volatile bool _isRunning;
-        private readonly List<TextPopup> _popups = [];
-        private readonly object _popupsLock = new();
-        private readonly string _className;
+        private Graphics _gfx;
+        private bool _isInitialized = false;
+        private bool _isDisposed = false;
+        private IntPtr _targetWindowHandle;
 
         public WindowsOverlayService()
         {
-            _className = "OverlayWindowClass_" + Guid.NewGuid().ToString("N");
-            RegisterWindowClass();
-        }
-        private void RegisterWindowClass()
-        {
-            var wndClass = new WNDCLASSEX
-            {
-                cbSize = (uint)Marshal.SizeOf(typeof(WNDCLASSEX)),
-                style = 0,
-                lpfnWndProc = Marshal.GetFunctionPointerForDelegate<WndProcDelegate>(WndProc),
-                cbClsExtra = 0,
-                cbWndExtra = 0,
-                hInstance = GetModuleHandle(null),
-                hIcon = IntPtr.Zero,
-                hCursor = IntPtr.Zero,
-                hbrBackground = IntPtr.Zero,
-                lpszMenuName = null,
-                lpszClassName = _className,
-                hIconSm = IntPtr.Zero
-            };
+            // Create overlay window (initially hidden)
+            _window = new StickyWindow(0, 0, 800, 600);
 
-            RegisterClassEx(ref wndClass);
-        }
-        private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+            // Configure window properties
+            _window.IsTopmost = true;
+            _window.IsVisible = false;
+            _window.FPS = 30; // Update frequency
 
-        private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
-        {
-            return msg switch
-            {
-                WM_PAINT => IntPtr.Zero,// Handled by our render thread
-                WM_ERASEBKGND => new IntPtr(1),// Prevent erasing to reduce flicker
-                WM_NCHITTEST => new IntPtr(HTTRANSPARENT),// Make the window click-through
-                _ => DefWindowProc(hWnd, msg, wParam, lParam),
-            };
+            // Setup rendering callback
+            _window.DrawGraphics += OnDrawGraphics;
+            _window.SetupGraphics += OnSetupGraphics;
+            _window.DestroyGraphics += OnDestroyGraphics;
+
+            // Create the window (but keep it hidden)
+            _window.Create();
         }
+
         public bool AttachToWindow(IntPtr targetWindowHandle)
         {
             if (targetWindowHandle == IntPtr.Zero)
                 return false;
 
-            _targetWindow = targetWindowHandle;
-
-            // Get target window dimensions
-            if (!GetWindowRect(_targetWindow, out RECT rect))
-                return false;
-
-            // Create overlay window
-            _overlayWindow = CreateWindowEx(
-                WS_EX_LAYERED | WS_EX_TRANSPARENT,
-                _className,
-                "Overlay Window",
-                WS_POPUP,
-                rect.Left, rect.Top,
-                rect.Width, rect.Height,
-                IntPtr.Zero,
-                IntPtr.Zero,
-                GetModuleHandle(null),
-                IntPtr.Zero);
-
-            if (_overlayWindow == IntPtr.Zero)
-                return false;
-
-            // Make window topmost
-            SetWindowPos(_overlayWindow, HWND_TOPMOST, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-
+            _targetWindowHandle = targetWindowHandle;
+            _window.PlaceAbove(targetWindowHandle);
             return true;
         }
 
         public void Show()
         {
-            if (_overlayWindow == IntPtr.Zero)
-                return;
-
-            // Make window visible
-            SetWindowPos(_overlayWindow, IntPtr.Zero, 0, 0, 0, 0,
-                SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-
-            _isRunning = true;
-            _renderThread = new Thread(RenderLoop)
-            {
-                IsBackground = true
-            };
-            _renderThread.Start();
+            if (_isDisposed) return;
+            _window.Show();
         }
+
         public void Hide()
         {
-            _isRunning = false;
-
-            if (_renderThread != null && _renderThread.IsAlive)
-            {
-                _renderThread.Join(1000);
-            }
-
-            // Hide window
-            if (_overlayWindow != IntPtr.Zero)
-            {
-                SetWindowPos(_overlayWindow, IntPtr.Zero, 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            }
+            if (_isDisposed) return;
+            _window.Hide();
         }
 
-        public void AddTextPopup(string text, int x, int y, Color textColor, double durationSeconds = 3.0, int fontSize = 14)
+        public void AddTextPopup(string text, IColor textColor, double durationSeconds = 3.0, float fontSize = 14)
         {
-            lock (_popupsLock)
+            if (_isDisposed) return;
+
+            // Create a unique ID for this popup
+            var id = Guid.NewGuid();
+
+            // Generate color from IColor interface
+            var color = new GameOverlay.Drawing.Color(
+                textColor.R,
+                textColor.G,
+                textColor.B,
+                textColor.A
+            );
+
+            // Check if we need to create a font of this size
+            if (!_fonts.ContainsKey(fontSize))
             {
-                _popups.Add(new TextPopup
+                if (_isInitialized)
                 {
-                    Text = text,
-                    Position = new Point(x, y),
-                    TextColor = textColor,
-                    Font = new Font("Arial", fontSize),
-                    ExpirationTime = DateTime.Now.AddSeconds(durationSeconds),
-                    BackgroundColor = Color.FromArgb(180, 0, 0, 0),
-                    Padding = 8
+                    _fonts[fontSize] = _gfx.CreateFont("Arial", fontSize);
+                }
+                else
+                {
+                    // We'll delay creation until graphics are initialized
+                }
+            }
+
+            // Create a brush key for this color
+            string brushKey = $"{color.R}:{color.G}:{color.B}:{color.A}";
+            if (!_brushes.ContainsKey(brushKey))
+            {
+                if (_isInitialized)
+                {
+                    _brushes[brushKey] = _gfx.CreateSolidBrush(color);
+                }
+                else
+                {
+                    // We'll delay creation until graphics are initialized
+                }
+            }
+
+            // Create the popup
+            var popup = new TextPopup
+            {
+                Text = text,
+                ExpireTime = DateTime.Now.AddSeconds(durationSeconds),
+                Opacity = 1.0f
+            };
+
+            // Add to active popups
+            _popups[id] = popup;
+
+            // Set up fade out and removal
+            double fadeStartTime = durationSeconds * 0.75; // Start fading after 75% of duration
+
+            // Start fade after delay
+            Task.Delay(TimeSpan.FromMilliseconds(fadeStartTime * 1000))
+                .ContinueWith(_ =>
+                {
+                    // Calculate how long to fade
+                    double fadeTime = durationSeconds - fadeStartTime;
+
+                    // Fade steps - update 20 times during fade
+                    int steps = 20;
+                    double stepTime = fadeTime / steps;
+                    float stepOpacity = 1.0f / steps;
+
+                    for (int i = 1; i <= steps; i++)
+                    {
+                        Task.Delay(TimeSpan.FromMilliseconds(i * stepTime * 1000))
+                            .ContinueWith(__ =>
+                            {
+                                if (_isDisposed) return;
+
+                                if (_popups.TryGetValue(id, out var p))
+                                {
+                                    p.Opacity = Math.Max(0, 1.0f - (i * stepOpacity));
+                                }
+                            });
+                    }
                 });
+
+            // Remove after expiration
+            Task.Delay(TimeSpan.FromMilliseconds(durationSeconds * 1000))
+                .ContinueWith(_ =>
+                {
+                    if (_isDisposed) return;
+                    _popups.TryRemove(id, out var ignore);
+                });
+        }
+
+        private void OnSetupGraphics(object sender, SetupGraphicsEventArgs e)
+        {
+            _gfx = e.Graphics;
+
+            // Initialize resources once we have graphics
+            if (!_isInitialized)
+            {
+                _isInitialized = true;
+                InitializeResources();
             }
         }
 
-        private void RenderLoop()
+        private void InitializeResources()
         {
-            while (_isRunning)
+            // Clear existing resources (if any)
+            foreach (var brush in _brushes.Values)
+            {
+                brush.Dispose();
+            }
+            _brushes.Clear();
+
+            foreach (var font in _fonts.Values)
+            {
+                font.Dispose();
+            }
+            _fonts.Clear();
+
+            // Create default font for initial popups
+            _fonts[14] = _gfx.CreateFont("Arial", 14);
+        }
+
+        private void OnDrawGraphics(object sender, DrawGraphicsEventArgs e)
+        {
+            // Update window position in case target window moved
+            if (_targetWindowHandle != IntPtr.Zero)
             {
                 try
                 {
-                    UpdateOverlayPosition();
-                    RenderOverlay();
-                    Thread.Sleep(16); // ~60 FPS
+                    GameOverlay.Windows.WindowHelper.GetWindowBounds(_targetWindowHandle, out var rect);
+                    _window.X = rect.Left;
+                    _window.Y = rect.Top;
+                    _window.Width = rect.Right - rect.Left;
+                    _window.Height = rect.Bottom - rect.Top;
                 }
-                catch
+                catch { /* Ignore errors if window is closed */ }
+            }
+
+            // Clear the scene with transparency
+            e.Graphics.ClearScene();
+
+            // Get the current time once for all popups
+            var now = DateTime.Now;
+            var index = 0;
+            // Draw active popups
+            foreach (var popup in _popups.OrderByDescending(x => x.Value.ExpireTime).ToDictionary<Guid, TextPopup>().Values)
+            {
+                if (popup.ExpireTime < now)
+                    continue;
+                // Get or create font
+                if (!_fonts.TryGetValue(popup.Font?.FontSize ?? 14.0f, out var font))
                 {
-                    // Handle exceptions
-                    Thread.Sleep(100);
+                    font = _gfx.CreateFont("Arial", popup.Font?.FontSize ?? 14.0f);
+                    _fonts[popup.Font?.FontSize ?? 14.0f] = font;
                 }
+                popup.Font = font;
+
+                // Create a brush key based on popup color
+                string brushKey = "1:1:1:1"; // Default white
+
+                if (popup.Brush != null)
+                {
+                    var color = popup.Brush.Color;
+                    brushKey = $"{color.R}:{color.G}:{color.B}:{color.A}";
+                }
+
+                // Get or create brush (adjust for opacity)
+                if (!_brushes.TryGetValue(brushKey, out var brush))
+                {
+                    // Default to white if we don't have a brush
+                    brush = _gfx.CreateSolidBrush(new GameOverlay.Drawing.Color(1, 1, 1, popup.Opacity));
+                    _brushes[brushKey] = brush;
+                }
+                popup.Brush = brush;
+
+                // Draw the text with current opacity
+                GameOverlay.Drawing.Color originalColor = popup.Brush.Color;
+                //popup.Brush.Color = new GameOverlay.Drawing.Color(
+                //    originalColor.R,
+                //    originalColor.G,
+                //    originalColor.B,
+                //    originalColor.A * popup.Opacity
+                //);
+                popup.Brush.Color = new GameOverlay.Drawing.Color(1f,1f,1f,1f);
+                e.Graphics.DrawText(popup.Font, popup.Brush, 100, 100 - (index * (popup.Font.FontSize + 3)), popup.Text);
+
+                // Restore original color
+                popup.Brush.Color = originalColor;
+                index++;
             }
         }
 
-        private void UpdateOverlayPosition()
+        private void OnDestroyGraphics(object sender, DestroyGraphicsEventArgs e)
         {
-            if (!GetWindowRect(_targetWindow, out RECT rect))
-                return;
-
-            SetWindowPos(_overlayWindow, HWND_TOPMOST,
-                rect.Left, rect.Top, rect.Width, rect.Height,
-                SWP_NOACTIVATE);
-        }
-
-        private void RenderOverlay()
-        {
-            if (_overlayWindow == IntPtr.Zero || !GetWindowRect(_overlayWindow, out RECT rect))
-                return;
-
-            int width = rect.Width;
-            int height = rect.Height;
-
-            // Get device context
-            IntPtr screenDC = GetDC(IntPtr.Zero);
-            IntPtr memDC = CreateCompatibleDC(screenDC);
-            IntPtr hBitmap = CreateCompatibleBitmap(screenDC, width, height);
-            IntPtr oldBitmap = SelectObject(memDC, hBitmap);
-
-            try
+            foreach (var brush in _brushes.Values)
             {
-                using (Graphics g = Graphics.FromHdc(memDC))
-                {
-                    g.SmoothingMode = SmoothingMode.AntiAlias;
-                    g.Clear(Color.Transparent);
-
-                    // Remove expired popups
-                    lock (_popupsLock)
-                    {
-                        _popups.RemoveAll(p => p.IsExpired);
-
-                        // Draw popups
-                        foreach (var popup in _popups)
-                        {
-                            // Measure text
-                            SizeF textSize = g.MeasureString(popup.Text, popup.Font);
-
-                            // Draw background
-                            int padding = popup.Padding;
-                            using (SolidBrush backBrush = new(popup.BackgroundColor))
-                            {
-                                g.FillRoundedRectangle(
-                                    backBrush,
-                                    popup.Position.X,
-                                    popup.Position.Y,
-                                    textSize.Width + (padding * 2),
-                                    textSize.Height + (padding * 2),
-                                    8);
-                            }
-
-                            // Draw text
-                            using SolidBrush textBrush = new(popup.TextColor);
-                            g.DrawString(popup.Text,
-                                         popup.Font,
-                                         textBrush,
-                                         popup.Position.X + padding,
-                                         popup.Position.Y + padding);
-                        }
-                    }
-                }
-
-                // Update layered window
-                POINT sourceLocation = new(0, 0);
-                POINT destLocation = new(rect.Left, rect.Top);
-                SIZE size = new(width, height);
-
-                BLENDFUNCTION blend = new()
-                {
-                    BlendOp = 0, // AC_SRC_OVER
-                    BlendFlags = 0,
-                    SourceConstantAlpha = 255,
-                    AlphaFormat = 1 // AC_SRC_ALPHA
-                };
-
-                UpdateLayeredWindow(
-                    _overlayWindow,
-                    screenDC,
-                    ref destLocation,
-                    ref size,
-                    memDC,
-                    ref sourceLocation,
-                    0,
-                    ref blend,
-                    2); // ULW_ALPHA
+                brush.Dispose();
             }
-            finally
+            _brushes.Clear();
+
+            foreach (var font in _fonts.Values)
             {
-                // Clean up
-                SelectObject(memDC, oldBitmap);
-                DeleteObject(hBitmap);
-                DeleteDC(memDC);
-                ReleaseDC(IntPtr.Zero, screenDC);
+                font.Dispose();
             }
+            _fonts.Clear();
+
+            _isInitialized = false;
         }
 
         public void Dispose()
         {
-            Hide();
+            if (_isDisposed) return;
+            _isDisposed = true;
 
-            if (_overlayWindow != IntPtr.Zero)
-            {
-                DestroyWindow(_overlayWindow);
-                _overlayWindow = IntPtr.Zero;
-            }
+            _popups.Clear();
+            _window.Dispose();
+
+            GC.SuppressFinalize(this);
         }
     }
 }
