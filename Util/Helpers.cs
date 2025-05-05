@@ -48,11 +48,11 @@ namespace Archipelago.Core.Util
                     }
                     else if (location.CompareType == LocationCheckCompareType.GreaterThan)
                     {
-                        return currentIntValue >= Convert.ToInt32(location.CheckValue);
+                        return currentIntValue > Convert.ToInt32(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.LessThan)
                     {
-                        return currentIntValue <= Convert.ToInt32(location.CheckValue);
+                        return currentIntValue < Convert.ToInt32(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.Range)
                     {
@@ -70,11 +70,11 @@ namespace Archipelago.Core.Util
                     }
                     else if (location.CompareType == LocationCheckCompareType.GreaterThan)
                     {
-                        return currentUIntValue >= Convert.ToUInt32(location.CheckValue);
+                        return currentUIntValue > Convert.ToUInt32(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.LessThan)
                     {
-                        return currentUIntValue <= Convert.ToUInt32(location.CheckValue);
+                        return currentUIntValue < Convert.ToUInt32(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.Range)
                     {
@@ -122,11 +122,11 @@ namespace Archipelago.Core.Util
                     }
                     else if (location.CompareType == LocationCheckCompareType.GreaterThan)
                     {
-                        return currentShortValue >= Convert.ToInt16(location.CheckValue);
+                        return currentShortValue > Convert.ToInt16(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.LessThan)
                     {
-                        return currentShortValue <= Convert.ToInt16(location.CheckValue);
+                        return currentShortValue < Convert.ToInt16(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.Range)
                     {
@@ -144,17 +144,49 @@ namespace Archipelago.Core.Util
                     }
                     else if (location.CompareType == LocationCheckCompareType.GreaterThan)
                     {
-                        return currentLongValue >= Convert.ToInt64(location.CheckValue);
+                        return currentLongValue > Convert.ToInt64(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.LessThan)
                     {
-                        return currentLongValue <= Convert.ToInt64(location.CheckValue);
+                        return currentLongValue < Convert.ToInt64(location.CheckValue);
                     }
                     else if (location.CompareType == LocationCheckCompareType.Range)
                     {
                         if (string.IsNullOrWhiteSpace(location.RangeEndValue)) throw new ArgumentException("RangeEndValue must be provided for location check type Range");
                         if (string.IsNullOrWhiteSpace(location.RangeStartValue)) throw new ArgumentException("RangeStartValue must be provided for location check type Range");
                         return (currentLongValue <= Convert.ToInt64(location.RangeEndValue) && currentLongValue >= Convert.ToInt64(location.RangeStartValue));
+                    }
+                    break;
+                case (LocationCheckType.Nibble):
+                    var currentNibbleValue = Memory.ReadByte(location.Address);
+                    byte nibbleValue;
+
+                    if (location.NibblePosition == NibblePosition.Upper)
+                    {
+                        nibbleValue = (byte)((currentNibbleValue >> 4) & 0x0F);
+                    }
+                    else 
+                    {
+                        nibbleValue = (byte)(currentNibbleValue & 0x0F);
+                    }
+
+                    if (location.CompareType == LocationCheckCompareType.Match)
+                    {
+                        return nibbleValue == Convert.ToByte(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.GreaterThan)
+                    {
+                        return nibbleValue > Convert.ToByte(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.LessThan)
+                    {
+                        return nibbleValue < Convert.ToByte(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.Range)
+                    {
+                        if (string.IsNullOrWhiteSpace(location.RangeEndValue)) throw new ArgumentException("RangeEndValue must be provided for location check type Range");
+                        if (string.IsNullOrWhiteSpace(location.RangeStartValue)) throw new ArgumentException("RangeStartValue must be provided for location check type Range");
+                        return (nibbleValue <= Convert.ToByte(location.RangeEndValue) && nibbleValue >= Convert.ToByte(location.RangeStartValue));
                     }
                     break;
                 default:
