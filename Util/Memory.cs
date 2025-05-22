@@ -17,7 +17,7 @@ namespace Archipelago.Core.Util
     public class Memory
     {
         #region Platform Implementation
-        private static readonly IMemory PlatformImpl;
+        internal static readonly IMemory PlatformImpl;
 
         static Memory()
         {
@@ -68,7 +68,14 @@ namespace Archipelago.Core.Util
                 return 0;
             }
         }
-
+        public static ulong GetPCSX2Offset()
+        {
+            return PCSX2.Helpers.GetEEmemOffset();
+        }
+        public static ulong GetDuckstationOffset()
+        {
+            return Duckstation.Helpers.GetEEmemOffset();
+        }
         public static Process GetProcessById(int id)
         {
             return Process.GetProcessById(id);
