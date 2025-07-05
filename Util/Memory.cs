@@ -1,8 +1,10 @@
 ﻿using Newtonsoft.Json.Linq;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Numerics;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
@@ -10,6 +12,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using static Archipelago.Core.Util.Enums;
+using static Archipelago.Core.Util.WindowsMemory;
 
 namespace Archipelago.Core.Util
 {
@@ -39,6 +42,8 @@ namespace Archipelago.Core.Util
 
         public const uint MEM_RELEASE = 0x00008000;
         public const uint MEM_COMMIT = 0x00001000;
+        public const uint MEM_RESERVE = 0x00002000;
+        public const uint MEM_TOP_DOWN = 0x00100000;
         #endregion
 
         #region Process Management
@@ -120,7 +125,54 @@ namespace Archipelago.Core.Util
             }
             return buffer;
         }
-
+        public static T ReadStruct<T>(ulong address)
+        {
+            int size = Marshal.SizeOf(typeof(T));
+            GCHandle handle = GCHandle.Alloc(size, GCHandleType.Pinned);
+            try
+            {
+                if (handle.Target == null)
+                {
+                    throw new NullReferenceException();
+                }
+                byte[] buffer = (byte[])handle.Target;
+                PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, buffer, size, out _);
+                return (T)Marshal.PtrToStructure(handle.AddrOfPinnedObject(), typeof(T));
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+        public static List<T> ReadStructs<T>(ulong address, int numStructs)
+        { 
+            int size = Marshal.SizeOf(typeof(T));
+            byte[] buffer = new byte[size * numStructs]; // Allocate the buffer
+            GCHandle handle = GCHandle.Alloc(buffer, GCHandleType.Pinned); // Pin the buffer
+            List<T> structures = new List<T>();
+            try
+            {
+                if (handle.Target == null)
+                {
+                    throw new NullReferenceException();
+                }
+                PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, buffer, numStructs* size, out _);
+                IntPtr basePtr = handle.AddrOfPinnedObject();
+                for (int i = 0; i < numStructs; i++)
+                {
+                    // Calculate the pointer for the current struct instance
+                    IntPtr currentStructPtr = new IntPtr(basePtr.ToInt64() + (long)i * size);
+                    // Unmarshal the struct from the calculated pointer
+                    T structure = (T)Marshal.PtrToStructure(currentStructPtr, typeof(T));
+                    structures.Add(structure);
+                }
+            }
+            finally
+            {
+                handle.Free();
+            }
+            return structures;
+        }
         public static bool ReadBit(ulong address, int bitNumber, Endianness endianness = Endianness.Little)
         {
             if (bitNumber < 0 || bitNumber > 7)
@@ -550,6 +602,23 @@ namespace Archipelago.Core.Util
 
             throw new NotSupportedException($"Type {propertyType.Name} is not supported for memory writing");
         }
+        public static void WriteStruct<T>(ulong address, T str)
+        {
+            int size = Marshal.SizeOf(typeof(T));
+            byte[] buffer = new byte[size];
+
+            IntPtr ptr = Marshal.AllocHGlobal(size);
+            try
+            {
+                Marshal.StructureToPtr(str, ptr, true);
+                Marshal.Copy(ptr, buffer, 0, size);
+                PlatformImpl.WriteProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, buffer, size, out _);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(ptr);
+            }
+        }
         #endregion
 
         #region Memory Operations
@@ -566,6 +635,36 @@ namespace Archipelago.Core.Util
         public static IntPtr Allocate(uint size, uint flProtect = PAGE_READWRITE)
         {
             return PlatformImpl.VirtualAllocEx(GetProcessH(CurrentProcId), IntPtr.Zero, (IntPtr)size, MEM_COMMIT, flProtect);
+        }
+
+        public static IntPtr AllocateAbove(uint size)
+        {
+            IntPtr freeAddress = FindFreeRegionBelow4GB(size);
+            return PlatformImpl.VirtualAllocEx(GetProcessH(CurrentProcId), freeAddress, (IntPtr)size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        }
+        static IntPtr FindFreeRegionBelow4GB(uint size)
+        {
+            const ulong MAX_32BIT = 0x7FFE0000;
+            IntPtr addr = (IntPtr)(MAX_32BIT - 0x1000);
+
+            while ((ulong)addr >= 0)
+            {
+                if (PlatformImpl.VirtualQueryEx(GetProcessH(CurrentProcId), addr, out MEMORY_BASIC_INFORMATION mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION))) == 0)
+                    break;
+                if(PlatformImpl.GetLastError() != 0)
+                {
+                    Log.Debug("Could not find suitable Address");
+                }
+                if ((MemoryState)mbi.State == MemoryState.Free && (long)mbi.RegionSize >= size)
+                {
+                    return new IntPtr(mbi.BaseAddress);
+                }
+
+                // Move to next region
+                addr = new IntPtr(mbi.BaseAddress.ToInt32() - 0x10000);
+            }
+
+            return IntPtr.Zero; // No suitable region found
         }
 
         public static bool FreeMemory(IntPtr address)
@@ -674,6 +773,23 @@ namespace Archipelago.Core.Util
                     await Task.Delay(10);
                 }
                 action();
+            });
+        }
+        public static Task MonitorAddressByteChangeForAction(ulong address, int trapVal, int actionVal, Action action)
+        {
+            return Task.Run(async () =>
+            {
+                int lastVal = ReadByte(address);
+                while (true)
+                {
+                    int value = ReadByte(address);
+                    if(lastVal == trapVal && value == actionVal)
+                    {
+                        action();
+                    }
+                    lastVal = value;
+                    await Task.Delay(10);
+                }
             });
         }
         private static bool IsBuiltInType(Type type)

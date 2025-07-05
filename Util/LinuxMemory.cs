@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using static Archipelago.Core.Util.Enums;
+using static Archipelago.Core.Util.WindowsMemory;
 
 namespace Archipelago.Core.Util
 {
@@ -153,6 +154,12 @@ namespace Archipelago.Core.Util
         public bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint dwFreeType)
         {
             return munmap(lpAddress, (ulong)dwSize.ToInt64()) == 0;
+        }
+
+        public IntPtr VirtualQueryEx(IntPtr hProcess, IntPtr lpAddress, out MEMORY_BASIC_INFORMATION lpBuffer, uint dwLength)
+        {
+            lpBuffer = new MEMORY_BASIC_INFORMATION{ };
+            return IntPtr.Zero;
         }
 
         public bool CloseHandle(IntPtr handle)

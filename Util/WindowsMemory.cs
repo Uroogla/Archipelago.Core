@@ -21,6 +21,26 @@ namespace Archipelago.Core.Util
         private const uint MEM_RELEASE = 0x00008000;
         #endregion
 
+        [Flags]
+        public enum MemoryState : uint
+        {
+            Free = 0x10000,
+            Reserve = 0x2000,
+            Commit = 0x1000,
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MEMORY_BASIC_INFORMATION
+        {
+            public IntPtr BaseAddress;
+            public IntPtr AllocationBase;
+            public uint AllocationProtect;
+            public IntPtr RegionSize;
+            public uint State;
+            public uint Protect;
+            public uint Type;
+        }
+
         #region Native Methods
         [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "ReadProcessMemory")]
         private static extern bool ReadProcessMemory_Win32(IntPtr processH, ulong lpBaseAddress, byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesRead);
@@ -34,8 +54,11 @@ namespace Archipelago.Core.Util
         [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "VirtualProtectEx")]
         private static extern bool VirtualProtectEx_Win32(IntPtr processH, IntPtr lpAddress, IntPtr dwSize, uint flNewProtect, out uint lpflOldProtect);
 
-        [DllImport("kernel32.dll", EntryPoint = "VirtualAllocEx")]
+        [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "VirtualAllocEx")]
         private static extern IntPtr VirtualAllocEx_Win32(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint flAllocationType, uint flProtect);
+
+        [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "VirtualQueryEx")]
+        static extern IntPtr VirtualQueryEx_Win32(IntPtr hProcess, IntPtr lpAddress, out MEMORY_BASIC_INFORMATION lpBuffer, uint dwLength);
 
         [DllImport("kernel32.dll", EntryPoint = "VirtualFreeEx")]
         private static extern bool VirtualFreeEx_Win32(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint dwFreeType);
@@ -87,6 +110,15 @@ namespace Archipelago.Core.Util
         {
             return VirtualAllocEx_Win32(hProcess, lpAddress, dwSize, flAllocationType, flProtect);
         }
+
+        public IntPtr VirtualQueryEx(IntPtr hProcess, IntPtr lpAddress, out MEMORY_BASIC_INFORMATION lpBuffer, uint dwLength)
+        {
+            IntPtr ptr = VirtualQueryEx_Win32(hProcess, lpAddress, out MEMORY_BASIC_INFORMATION mbi, dwLength);
+            lpBuffer = mbi;
+            return ptr;
+        }
+
+
 
         public bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint dwFreeType)
         {
