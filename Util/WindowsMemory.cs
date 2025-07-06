@@ -118,7 +118,30 @@ namespace Archipelago.Core.Util
             return ptr;
         }
 
+        public IntPtr FindFreeRegionBelow4GB(IntPtr hProcess, uint size)
+        {
+            const ulong MAX_32BIT = 0x7FFE0000;
+            IntPtr lpAddress = (IntPtr)(MAX_32BIT - 0x1000);
 
+            while ((ulong)lpAddress >= 0)
+            {
+                if (VirtualQueryEx(hProcess, lpAddress, out MEMORY_BASIC_INFORMATION mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION))) == 0)
+                    break;
+                if (GetLastError() != 0)
+                {
+                    Console.WriteLine("Could not find suitable Address");
+                }
+                if ((MemoryState)mbi.State == MemoryState.Free && (long)mbi.RegionSize >= size)
+                {
+                    return new IntPtr(mbi.BaseAddress);
+                }
+
+                // Move to next region
+                lpAddress = new IntPtr(mbi.BaseAddress.ToInt32() - 0x10000);
+            }
+
+            return IntPtr.Zero; // No suitable region found
+        }
 
         public bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint dwFreeType)
         {

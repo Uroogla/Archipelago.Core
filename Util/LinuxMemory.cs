@@ -6,7 +6,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using static Archipelago.Core.Util.Enums;
-using static Archipelago.Core.Util.WindowsMemory;
 
 namespace Archipelago.Core.Util
 {
@@ -156,10 +155,9 @@ namespace Archipelago.Core.Util
             return munmap(lpAddress, (ulong)dwSize.ToInt64()) == 0;
         }
 
-        public IntPtr VirtualQueryEx(IntPtr hProcess, IntPtr lpAddress, out MEMORY_BASIC_INFORMATION lpBuffer, uint dwLength)
+        public IntPtr FindFreeRegionBelow4GB(IntPtr processHandle, uint size)
         {
-            lpBuffer = new MEMORY_BASIC_INFORMATION{ };
-            return IntPtr.Zero;
+            throw new NotImplementedException();
         }
 
         public bool CloseHandle(IntPtr handle)
@@ -286,6 +284,7 @@ namespace Archipelago.Core.Util
                 return 0;
             }
         }
+
         #endregion
     }
 }

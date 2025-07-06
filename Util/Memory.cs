@@ -12,7 +12,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using static Archipelago.Core.Util.Enums;
-using static Archipelago.Core.Util.WindowsMemory;
 
 namespace Archipelago.Core.Util
 {
@@ -648,32 +647,8 @@ namespace Archipelago.Core.Util
 
         public static IntPtr AllocateAbove(uint size)
         {
-            IntPtr freeAddress = FindFreeRegionBelow4GB(size);
+            IntPtr freeAddress = PlatformImpl.FindFreeRegionBelow4GB(GetProcessH(CurrentProcId), size);
             return PlatformImpl.VirtualAllocEx(GetProcessH(CurrentProcId), freeAddress, (IntPtr)size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-        }
-        static IntPtr FindFreeRegionBelow4GB(uint size)
-        {
-            const ulong MAX_32BIT = 0x7FFE0000;
-            IntPtr addr = (IntPtr)(MAX_32BIT - 0x1000);
-
-            while ((ulong)addr >= 0)
-            {
-                if (PlatformImpl.VirtualQueryEx(GetProcessH(CurrentProcId), addr, out MEMORY_BASIC_INFORMATION mbi, (uint)Marshal.SizeOf(typeof(MEMORY_BASIC_INFORMATION))) == 0)
-                    break;
-                if(PlatformImpl.GetLastError() != 0)
-                {
-                    Log.Debug("Could not find suitable Address");
-                }
-                if ((MemoryState)mbi.State == MemoryState.Free && (long)mbi.RegionSize >= size)
-                {
-                    return new IntPtr(mbi.BaseAddress);
-                }
-
-                // Move to next region
-                addr = new IntPtr(mbi.BaseAddress.ToInt32() - 0x10000);
-            }
-
-            return IntPtr.Zero; // No suitable region found
         }
 
         public static bool FreeMemory(IntPtr address)
@@ -789,7 +764,7 @@ namespace Archipelago.Core.Util
                 action();
             });
         }
-        public static Task MonitorAddressByteChangeForAction(ulong address, int trapVal, int actionVal, Action action)
+        public static Task MonitorAddressByteChangeForAction(ulong address, int readyTriggerVal, int triggerActionVal, Action action)
         {
             return Task.Run(async () =>
             {
@@ -797,7 +772,7 @@ namespace Archipelago.Core.Util
                 while (true)
                 {
                     int value = ReadByte(address);
-                    if(lastVal == trapVal && value == actionVal)
+                    if(lastVal == readyTriggerVal && value == triggerActionVal)
                     {
                         action();
                     }

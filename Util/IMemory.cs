@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using static Archipelago.Core.Util.Enums;
-using static Archipelago.Core.Util.WindowsMemory;
 
 namespace Archipelago.Core.Util
 {
@@ -24,6 +23,6 @@ namespace Archipelago.Core.Util
         uint Execute(nint v, nint address, uint timeoutSeconds);
         uint ExecuteCommand(nint v, byte[] bytes, uint timeoutSeconds);
         MODULEINFO GetModuleInfo(IntPtr processHandle, string moduleName);
-        IntPtr VirtualQueryEx(IntPtr hProcess, IntPtr lpAddress, out MEMORY_BASIC_INFORMATION lpBuffer, uint dwLength);
+        IntPtr FindFreeRegionBelow4GB(IntPtr processHandle, uint size);
     }
 }
