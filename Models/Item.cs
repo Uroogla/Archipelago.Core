@@ -12,7 +12,6 @@ namespace Archipelago.Core.Models
     {
         private string name;
         private string category;
-        private int quantity;
         private long id;
         private bool isProgression;
         public string Name
@@ -23,18 +22,6 @@ namespace Archipelago.Core.Models
                 if (name != value)
                 {
                     name = value;
-                    OnPropertyChanged();
-                }
-            }
-        }
-        public int Quantity
-        {
-            get => quantity;
-            set
-            {
-                if (quantity != value)
-                {
-                    quantity = value;
                     OnPropertyChanged();
                 }
             }
