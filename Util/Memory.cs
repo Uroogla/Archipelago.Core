@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net;
 using System.Numerics;
 using System.Reflection;
 using System.Reflection.Metadata;
@@ -132,14 +133,14 @@ namespace Archipelago.Core.Util
         public static T ReadStruct<T>(ulong address)
         {
             int size = Marshal.SizeOf(typeof(T));
-            GCHandle handle = GCHandle.Alloc(size, GCHandleType.Pinned);
+            byte[] buffer = new byte[size]; // Allocate the buffer
+            GCHandle handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
             try
             {
                 if (handle.Target == null)
                 {
                     throw new NullReferenceException();
                 }
-                byte[] buffer = (byte[])handle.Target;
                 PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, buffer, size, out _);
                 return (T)Marshal.PtrToStructure(handle.AddrOfPinnedObject(), typeof(T));
             }
@@ -638,7 +639,7 @@ namespace Archipelago.Core.Util
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
             return PlatformImpl.VirtualProtectEx(GetProcessH(CurrentProcId), (IntPtr)address, (IntPtr)length, PAGE_READWRITE, out var oldProtect);
         }
-
+        
         public static IntPtr Allocate(uint size, uint flProtect = PAGE_READWRITE)
         {
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
