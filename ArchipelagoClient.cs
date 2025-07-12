@@ -1,5 +1,6 @@
 ﻿using Archipelago.Core.Models;
 using Archipelago.Core.Util;
+using Archipelago.Core.Util.GPS;
 using Archipelago.Core.Util.Overlay;
 using Archipelago.MultiClient.Net;
 using Archipelago.MultiClient.Net.BounceFeatures.DeathLink;
@@ -24,8 +25,9 @@ namespace Archipelago.Core
         public event EventHandler<ConnectionChangedEventArgs>? Connected;
         public event EventHandler<MessageReceivedEventArgs>? MessageReceived;
         public event EventHandler<LocationCompletedEventArgs>? LocationCompleted;
+        public Func<bool>? EnableLocationsCondition;
         public ArchipelagoSession CurrentSession { get; set; }
-        private List<Location> Locations { get; set; } = [];
+        public GPSHandler GPSHandler { get; set; }
         private string GameName { get; set; } = "";
         private string Seed { get; set; } = "";
         private Dictionary<string, object> _options = [];
@@ -33,11 +35,10 @@ namespace Archipelago.Core
         public GameState GameState { get; set; }
         private IOverlayService? OverlayService { get; set; }
 
-        private readonly SemaphoreSlim _receiveItemSemaphore = new SemaphoreSlim(1,1);
+        private readonly SemaphoreSlim _receiveItemSemaphore = new SemaphoreSlim(1, 1);
         private bool isOverlayEnabled = false;
 
         private const int BATCH_SIZE = 25;
-        private readonly object _lockObject = new object();
         private CancellationTokenSource _cancellationTokenSource { get; set; } = new CancellationTokenSource();
         public ArchipelagoClient(IGameClient gameClient)
         {
@@ -177,52 +178,29 @@ namespace Archipelago.Core
         }
         private async Task ReceiveItems(CancellationToken cancellationToken = default)
         {
-            
+
             cancellationToken = CombineTokens(cancellationToken);
             await _receiveItemSemaphore.WaitAsync(cancellationToken);
             try
             {
                 await LoadGameStateAsync(cancellationToken);
 
-                var newItemInfo = CurrentSession.Items.PeekItem();
-                var itemsToAdd = new List<Item>();
+                var newItemInfo = CurrentSession.Items.DequeueItem();
                 while (newItemInfo != null)
                 {
                     var item = new Item
                     {
                         Id = newItemInfo.ItemId,
                         Name = newItemInfo.ItemName,
-                        Quantity = 1
                     };
 
-                    var existingItem = GameState.ReceivedItems.FirstOrDefault(x => x.Id == item.Id);
-                    var totalReceivedCount = CurrentSession.Items.AllItemsReceived.Count(z => z.ItemId == item.Id);
-
-                    if (existingItem != null)
-                    {
-                        var currentQuantity = GameState.ReceivedItems.Where(x => x.Id == item.Id).Sum(y => y.Quantity);
-                        if (currentQuantity < totalReceivedCount)
-                        {
-                            Log.Debug($"Increasing received quantity for {item.Name} from {currentQuantity} to {totalReceivedCount}");
-                            existingItem.Quantity = totalReceivedCount;
-                            ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
-                        }
-                    }
-                    else if (totalReceivedCount > 0)
-                    {
-                        Log.Debug($"Adding new item {item.Name} with quantity {totalReceivedCount}");
-                        item.Quantity = totalReceivedCount;
-                        itemsToAdd.Add(item);
-                    }
-
-                    CurrentSession.Items.DequeueItem();
-                    newItemInfo = CurrentSession.Items.PeekItem();
-                }
-                foreach (var item in itemsToAdd)
-                {
+                    Log.Debug($"Adding new item {item.Name}");
                     GameState.ReceivedItems.Add(item);
                     ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
+
+                    newItemInfo = CurrentSession.Items.DequeueItem();
                 }
+
                 if (!cancellationToken.IsCancellationRequested)
                 {
                     await SaveGameStateAsync(cancellationToken);
@@ -233,21 +211,7 @@ namespace Archipelago.Core
                 _receiveItemSemaphore.Release();
             }
         }
-        [Obsolete("PopulateLocations is now deprecated, please use MonitorLocations instead")]
-        public async Task PopulateLocations(List<Location> locations, CancellationToken cancellationToken = default)
-        {
-            cancellationToken = CombineTokens(cancellationToken);
-            if (!IsConnected || CurrentSession == null)
-            {
-                Log.Information("Ensure client is connected before populating locations!");
-                return;
-            }
-            Locations = locations;
-            Log.Debug($"Monitoring {locations.Count} locations");
-            await MonitorLocations(Locations, cancellationToken);
 
-            return;
-        }
         public async Task MonitorLocations(List<Location> locations, CancellationToken cancellationToken = default)
         {
             cancellationToken = CombineTokens(cancellationToken);
@@ -277,25 +241,28 @@ namespace Archipelago.Core
             while (!batch.All(x => completed.Any(y => y.Id == x.Id)))
             {
                 if (token.IsCancellationRequested) return;
-                foreach (var location in batch)
+                if (EnableLocationsCondition?.Invoke() ?? true)
                 {
-                    var isCompleted = Helpers.CheckLocation(location);
-                    if (isCompleted)
+                    foreach (var location in batch)
                     {
-                        completed.Add(location);
-                        //  Log.Logger.Information(JsonConvert.SerializeObject(location));
+                        var isCompleted = Helpers.CheckLocation(location);
+                        if (isCompleted)
+                        {
+                            completed.Add(location);
+                            //  Log.Logger.Information(JsonConvert.SerializeObject(location));
+                        }
                     }
-                }
-                if (completed.Count > 0)
-                {
-                    foreach (var location in completed)
+                    if (completed.Count > 0)
                     {
-                        SendLocation(location, token);
-                        Log.Information($"{location.Name} ({location.Id}) Completed");
-                        batch.Remove(location);
+                        foreach (var location in completed)
+                        {
+                            SendLocation(location, token);
+                            Log.Information($"{location.Name} ({location.Id}) Completed");
+                            batch.Remove(location);
+                        }
                     }
+                    completed.Clear();
                 }
-                completed.Clear();
                 await Task.Delay(500, token);
             }
         }
@@ -307,11 +274,18 @@ namespace Archipelago.Core
                 Log.Information("Must be connected and logged in to send locations.");
                 return;
             }
-            Log.Debug($"Marking location {location.Id} as complete");
+            if (EnableLocationsCondition?.Invoke() ?? true)
+            {
+                Log.Debug($"Marking location {location.Id} as complete");
 
-            await CurrentSession.Locations.CompleteLocationChecksAsync([(long)location.Id]);
-            GameState.CompletedLocations.Add(location);
-            LocationCompleted?.Invoke(this, new LocationCompletedEventArgs(location));
+                await CurrentSession.Locations.CompleteLocationChecksAsync([(long)location.Id]);
+                GameState.CompletedLocations.Add(location);
+                LocationCompleted?.Invoke(this, new LocationCompletedEventArgs(location));
+            }
+            else
+            {
+                Log.Debug("Location precondition not met, location not sent");
+            }
         }
 
         public async Task SaveGameStateAsync(CancellationToken cancellationToken = default)
@@ -322,7 +296,7 @@ namespace Archipelago.Core
 
             try
             {
-                var dataStorage = await CurrentSession.DataStorage.GetSlotDataAsync(CurrentSession.ConnectionInfo.Slot);                
+                var dataStorage = await CurrentSession.DataStorage.GetSlotDataAsync(CurrentSession.ConnectionInfo.Slot);
                 await CurrentSession.Socket.SendPacketAsync(new SetPacket()
                 {
                     Key = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}_GameState",
@@ -336,9 +310,9 @@ namespace Archipelago.Core
                         }
                     }
                 });
-                
+
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 Log.Logger.Error("Failed to save to datastorage");
             }
@@ -393,8 +367,8 @@ namespace Archipelago.Core
             {
                 Disconnect();
             }
-            OverlayService.Hide();
-            OverlayService.Dispose();
+            OverlayService?.Hide();
+            OverlayService?.Dispose();
             _cancellationTokenSource.Dispose();
 
         }
