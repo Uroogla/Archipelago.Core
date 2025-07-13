@@ -23,5 +23,6 @@ namespace Archipelago.Core.Util
         uint Execute(nint v, nint address, uint timeoutSeconds);
         uint ExecuteCommand(nint v, byte[] bytes, uint timeoutSeconds);
         MODULEINFO GetModuleInfo(IntPtr processHandle, string moduleName);
+        IntPtr FindFreeRegionBelow4GB(IntPtr processHandle, uint size);
     }
 }

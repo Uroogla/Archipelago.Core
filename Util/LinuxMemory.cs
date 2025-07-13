@@ -155,6 +155,11 @@ namespace Archipelago.Core.Util
             return munmap(lpAddress, (ulong)dwSize.ToInt64()) == 0;
         }
 
+        public IntPtr FindFreeRegionBelow4GB(IntPtr processHandle, uint size)
+        {
+            throw new NotImplementedException();
+        }
+
         public bool CloseHandle(IntPtr handle)
         {
             // Nothing to close in Linux implementation since we use PIDs directly
@@ -279,6 +284,7 @@ namespace Archipelago.Core.Util
                 return 0;
             }
         }
+
         #endregion
     }
 }
