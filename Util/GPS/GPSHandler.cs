@@ -10,7 +10,6 @@ namespace Archipelago.Core.Util.GPS
     public class GPSHandler
     {
         private Timer _pollingTimer;
-        private readonly object _lockObject = new object();
         public int MapId { get; private set; }
         public string MapName { get; private set; }
         public string Region { get; private set; }
@@ -19,7 +18,7 @@ namespace Archipelago.Core.Util.GPS
         public float Z { get; private set; }
         public event EventHandler<PositionChangedEventArgs> PositionChanged;
         public event EventHandler<MapChangedEventArgs> MapChanged;
-        private Func<PositionData>  _updatePositionCallback;
+        private Func<PositionData> _updatePositionCallback;
         private TimeSpan _pollingInterval;
         private bool _disposed;
 
@@ -33,7 +32,7 @@ namespace Archipelago.Core.Util.GPS
             if (_disposed) throw new ObjectDisposedException(nameof(GPSHandler));
 
             _pollingTimer?.Dispose();
-            _pollingTimer = new Timer((o)=> UpdatePosition(), null, TimeSpan.Zero, _pollingInterval);
+            _pollingTimer = new Timer((o) => UpdatePosition(), null, TimeSpan.Zero, _pollingInterval);
         }
         public void Stop()
         {
@@ -56,7 +55,7 @@ namespace Archipelago.Core.Util.GPS
             Y = positionData.Y;
             Z = positionData.Z;
             Region = positionData.Region;
-            if(oldMapId != MapId || oldMapName != MapName)
+            if (oldMapId != MapId || oldMapName != MapName)
             {
                 MapChanged?.Invoke(this, new MapChangedEventArgs(oldMapId, oldMapName, MapId, MapName));
             }
@@ -79,18 +78,16 @@ namespace Archipelago.Core.Util.GPS
         }
         public PositionData GetCurrentPosition()
         {
-            lock (_lockObject)
+            return new PositionData
             {
-                return new PositionData
-                {
-                    MapId = MapId,
-                    MapName = MapName,
-                    Region = Region,
-                    X = X,
-                    Y = Y,
-                    Z = Z
-                };
-            }
+                MapId = MapId,
+                MapName = MapName,
+                Region = Region,
+                X = X,
+                Y = Y,
+                Z = Z
+            };
+
         }
         public void Dispose()
         {

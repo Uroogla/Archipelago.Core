@@ -12,17 +12,31 @@ namespace Archipelago.Core.Util.Overlay
     public class WindowsOverlayService : IOverlayService
     {
         private readonly StickyWindow _window;
-        private readonly Dictionary<string, SolidBrush> _brushes = new Dictionary<string, SolidBrush>();
-        private readonly Dictionary<float, Font> _fonts = new Dictionary<float, Font>();
         private readonly ConcurrentDictionary<Guid, TextPopup> _popups = new ConcurrentDictionary<Guid, TextPopup>();
 
         private Graphics _gfx;
         private bool _isInitialized = false;
         private bool _isDisposed = false;
         private IntPtr _targetWindowHandle;
-
-        public WindowsOverlayService()
+        private Font _selectedFont = null;
+        private float _fontSize = 14;
+        private IColor _textColor = Color.White;
+        private float _xOffset = 100;
+        private float _yOffset = 100;
+        private SolidBrush _brush;
+        private float _fadeDuration = 10.0f;
+        public WindowsOverlayService(OverlayOptions options = null)
         {
+            if (options != null)
+            {
+                if (options.Font != null) _selectedFont = options.Font;
+                if (options.FontSize != 0) _fontSize = options.FontSize;
+                if (options.TextColor != null) _textColor = options.TextColor;
+                _xOffset = options.XOffset;
+                _yOffset = options.YOffset;
+                _fadeDuration = options.FadeDuration;
+
+            }
             // Create overlay window (initially hidden)
             _window = new StickyWindow(0, 0, 800, 600);
 
@@ -62,91 +76,26 @@ namespace Archipelago.Core.Util.Overlay
             _window.Hide();
         }
 
-        public void AddTextPopup(string text, IColor textColor, double durationSeconds = 3.0, float fontSize = 14)
+        public void AddTextPopup(string text)
         {
-            if (_isDisposed) return;
-
+            if (_isDisposed || !_isInitialized) return;
             // Create a unique ID for this popup
-            var id = Guid.NewGuid();
-
-            // Generate color from IColor interface
-            var color = new GameOverlay.Drawing.Color(
-                textColor.R,
-                textColor.G,
-                textColor.B,
-                textColor.A
-            );
-
-            // Check if we need to create a font of this size
-            if (!_fonts.ContainsKey(fontSize))
-            {
-                if (_isInitialized)
-                {
-                    _fonts[fontSize] = _gfx.CreateFont("Arial", fontSize);
-                }
-                else
-                {
-                    // We'll delay creation until graphics are initialized
-                }
-            }
-
-            // Create a brush key for this color
-            string brushKey = $"{color.R}:{color.G}:{color.B}:{color.A}";
-            if (!_brushes.ContainsKey(brushKey))
-            {
-                if (_isInitialized)
-                {
-                    _brushes[brushKey] = _gfx.CreateSolidBrush(color);
-                }
-                else
-                {
-                    // We'll delay creation until graphics are initialized
-                }
-            }
+            var id = Guid.NewGuid();              
 
             // Create the popup
             var popup = new TextPopup
             {
                 Text = text,
-                ExpireTime = DateTime.Now.AddSeconds(durationSeconds),
-                Opacity = 1.0f
+                ExpireTime = DateTime.Now.AddSeconds(_fadeDuration),
+                Opacity = 1.0f,
+                Duration = _fadeDuration
             };
 
             // Add to active popups
             _popups[id] = popup;
 
-            // Set up fade out and removal
-            double fadeStartTime = durationSeconds * 0.75; // Start fading after 75% of duration
-
-            // Start fade after delay
-            Task.Delay(TimeSpan.FromMilliseconds(fadeStartTime * 1000))
-                .ContinueWith(_ =>
-                {
-                    // Calculate how long to fade
-                    double fadeTime = durationSeconds - fadeStartTime;
-
-                    // Fade steps - update 20 times during fade
-                    int steps = 20;
-                    double stepTime = fadeTime / steps;
-                    float stepOpacity = 1.0f / steps;
-
-                    for (int i = 1; i <= steps; i++)
-                    {
-                        Task.Delay(TimeSpan.FromMilliseconds(i * stepTime * 1000))
-                            .ContinueWith(__ =>
-                            {
-                                if (_isDisposed) return;
-
-                                if (_popups.TryGetValue(id, out var p))
-                                {
-                                    p.Opacity = Math.Max(0, 1.0f - (i * stepOpacity));
-                                }
-                            });
-                    }
-                });
-
             // Remove after expiration
-            Task.Delay(TimeSpan.FromMilliseconds(durationSeconds * 1000))
+            Task.Delay(TimeSpan.FromMilliseconds(_fadeDuration * 1000))
                 .ContinueWith(_ =>
                 {
                     if (_isDisposed) return;
@@ -161,29 +110,24 @@ namespace Archipelago.Core.Util.Overlay
             // Initialize resources once we have graphics
             if (!_isInitialized)
             {
+                if (_selectedFont != null)
+                {
+                    _selectedFont = _gfx.CreateFont(_selectedFont.FontFamilyName, _fontSize);
+                }
+                else _selectedFont = _gfx.CreateFont("Arial", _fontSize);
+
+                var color = new GameOverlay.Drawing.Color(
+                    _textColor.R,
+                    _textColor.G,
+                    _textColor.B,
+                    _textColor.A
+                );
+                _brush = _gfx.CreateSolidBrush(color);
+
                 _isInitialized = true;
-                InitializeResources();
             }
         }
 
-        private void InitializeResources()
-        {
-            // Clear existing resources (if any)
-            foreach (var brush in _brushes.Values)
-            {
-                brush.Dispose();
-            }
-            _brushes.Clear();
-
-            foreach (var font in _fonts.Values)
-            {
-                font.Dispose();
-            }
-            _fonts.Clear();
-
-            // Create default font for initial popups
-            _fonts[14] = _gfx.CreateFont("Arial", 14);
-        }
 
         private void OnDrawGraphics(object sender, DrawGraphicsEventArgs e)
         {
@@ -207,68 +151,47 @@ namespace Archipelago.Core.Util.Overlay
             // Get the current time once for all popups
             var now = DateTime.Now;
             var index = 0;
+
+            var activePopups = _popups.Values
+        .Where(p => p.ExpireTime >= now)
+        .OrderByDescending(p => p.ExpireTime)
+        .Take(10);
+
             // Draw active popups
-            foreach (var popup in _popups.OrderByDescending(x => x.Value.ExpireTime).ToDictionary<Guid, TextPopup>().Values)
+            foreach (var popup in activePopups)
             {
                 if (popup.ExpireTime < now)
                     continue;
                 // Get or create font
-                if (!_fonts.TryGetValue(popup.Font?.FontSize ?? 14.0f, out var font))
-                {
-                    font = _gfx.CreateFont("Arial", popup.Font?.FontSize ?? 14.0f);
-                    _fonts[popup.Font?.FontSize ?? 14.0f] = font;
-                }
-                popup.Font = font;
 
-                // Create a brush key based on popup color
-                string brushKey = "1:1:1:1"; // Default white
-
-                if (popup.Brush != null)
+                var elapsed = (now - popup.ExpireTime.AddSeconds(-popup.Duration)).TotalSeconds;
+                var fadeStartTime = popup.Duration * 0.75;
+                if (elapsed >= fadeStartTime)
                 {
-                    var color = popup.Brush.Color;
-                    brushKey = $"{color.R}:{color.G}:{color.B}:{color.A}";
+                    var fadeProgress = (elapsed - fadeStartTime) / (popup.Duration - fadeStartTime);
+                    popup.Opacity = Math.Max(0, 1.0f - (float)fadeProgress);
                 }
-
-                // Get or create brush (adjust for opacity)
-                if (!_brushes.TryGetValue(brushKey, out var brush))
-                {
-                    // Default to white if we don't have a brush
-                    brush = _gfx.CreateSolidBrush(new GameOverlay.Drawing.Color(1, 1, 1, popup.Opacity));
-                    _brushes[brushKey] = brush;
-                }
-                popup.Brush = brush;
+                popup.Font = _selectedFont;
+                popup.Brush = _brush;
 
                 // Draw the text with current opacity
                 GameOverlay.Drawing.Color originalColor = popup.Brush.Color;
-                //popup.Brush.Color = new GameOverlay.Drawing.Color(
-                //    originalColor.R,
-                //    originalColor.G,
-                //    originalColor.B,
-                //    originalColor.A * popup.Opacity
-                //);
-                popup.Brush.Color = new GameOverlay.Drawing.Color(1f,1f,1f,1f);
-                e.Graphics.DrawText(popup.Font, popup.Brush, 100, 100 - (index * (popup.Font.FontSize + 3)), popup.Text);
-
-                // Restore original color
-                popup.Brush.Color = originalColor;
+                popup.Brush.Color = new GameOverlay.Drawing.Color(
+                    originalColor.R,
+                    originalColor.G,
+                    originalColor.B,
+                    originalColor.A * popup.Opacity
+                );
+                e.Graphics.DrawText(popup.Font, popup.Brush, _xOffset, _yOffset - (index * (_fontSize + 3)), popup.Text);
+                _brush.Color = originalColor;
                 index++;
             }
         }
 
         private void OnDestroyGraphics(object sender, DestroyGraphicsEventArgs e)
         {
-            foreach (var brush in _brushes.Values)
-            {
-                brush.Dispose();
-            }
-            _brushes.Clear();
-
-            foreach (var font in _fonts.Values)
-            {
-                font.Dispose();
-            }
-            _fonts.Clear();
-
+            _selectedFont?.Dispose();
+            _brush?.Dispose();
             _isInitialized = false;
         }
 

@@ -13,6 +13,6 @@ namespace Archipelago.Core.Util.Overlay
         bool AttachToWindow(IntPtr targetWindowHandle);
         void Show();
         void Hide();
-        void AddTextPopup(string text, IColor textColor, double durationSeconds = 3.0, float fontSize = 14);
+        void AddTextPopup(string text);
     }
 }

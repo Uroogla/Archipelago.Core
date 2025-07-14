@@ -12,11 +12,9 @@ namespace Archipelago.Core.Models
         {
             CompletedLocations = new List<Location>();
             ReceivedItems = new List<Item>();
-            CustomValues = new Dictionary<string, object>();
         }
         
         public List<Location> CompletedLocations { get; set; }
         public List<Item> ReceivedItems { get; set; }
-        public Dictionary<string, object> CustomValues { get; set; }
     }
 }

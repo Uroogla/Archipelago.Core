@@ -14,5 +14,6 @@ namespace Archipelago.Core.Util.Overlay
         public SolidBrush Brush { get; set; }
         public DateTime ExpireTime { get; set; }
         public float Opacity { get; set; } = 1.0f;
+        public float Duration { get; set; } = 10.0f;
     }
 }

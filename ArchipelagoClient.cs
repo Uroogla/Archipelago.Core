@@ -18,6 +18,8 @@ namespace Archipelago.Core
     public class ArchipelagoClient : IDisposable
     {
         private const int SaveLoadTimeoutMs = 5000;
+        private readonly Timer _gameStateTimer;
+        private DateTime _lastGameStateUpdate = DateTime.MinValue;
         public bool IsConnected { get; set; }
         public bool IsLoggedIn { get; set; }
         public event EventHandler<ItemReceivedEventArgs>? ItemReceived;
@@ -27,23 +29,46 @@ namespace Archipelago.Core
         public event EventHandler<LocationCompletedEventArgs>? LocationCompleted;
         public Func<bool>? EnableLocationsCondition;
         public ArchipelagoSession CurrentSession { get; set; }
-        public GPSHandler GPSHandler { get; set; }
+        public GPSHandler GPSHandler
+        {
+            get
+            {
+                return _gpsHandler;
+            }
+            set
+            {
+                if (_gpsHandler != value)
+                {
+                    _gpsHandler = value;
+                    if (_gpsHandler != null)
+                    {
+                        _gpsHandler.PositionChanged += _gpsHandler_PositionChanged;
+                        _gpsHandler.MapChanged += _gpsHandler_MapChanged;
+                    }
+                }
+            }
+        }
+
+
+
         private string GameName { get; set; } = "";
         private string Seed { get; set; } = "";
         private Dictionary<string, object> _options = [];
         public Dictionary<string, object> Options { get { return _options; } }
         public GameState GameState { get; set; }
+        public Dictionary<string, object> CustomValues { get; set; }
         private IOverlayService? OverlayService { get; set; }
 
         private readonly SemaphoreSlim _receiveItemSemaphore = new SemaphoreSlim(1, 1);
         private bool isOverlayEnabled = false;
-
+        private GPSHandler _gpsHandler;
         private const int BATCH_SIZE = 25;
         private CancellationTokenSource _cancellationTokenSource { get; set; } = new CancellationTokenSource();
         public ArchipelagoClient(IGameClient gameClient)
         {
             Memory.CurrentProcId = gameClient.ProcId;
             AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
+            _gameStateTimer = new Timer(PeriodicGameStateUpdate, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
         }
         public void IntializeOverlayService(IOverlayService overlayService)
         {
@@ -71,8 +96,8 @@ namespace Archipelago.Core
             }
             catch (Exception ex)
             {
-                Log.Information("Couldn't connect to Archipelago");
-                Log.Information(ex.Message);
+                Log.Error("Couldn't connect to Archipelago");
+                Log.Error(ex.Message);
             }
         }
         private async void ItemReceivedHandler(ReceivedItemsHelper helper)
@@ -82,7 +107,7 @@ namespace Archipelago.Core
 
         private void Socket_SocketClosed(string reason)
         {
-            Log.Information($"Connection Closed: {reason}");
+            Log.Warning($"Connection Closed: {reason}");
             Disconnect();
         }
 
@@ -109,14 +134,14 @@ namespace Archipelago.Core
         {
             cancellationToken = CombineTokens(cancellationToken);
             var loginResult = await CurrentSession.LoginAsync(GameName, playerName, ItemsHandlingFlags.AllItems, Version.Parse("0.6.1"), password: password, requestSlotData: true);
-            Log.Information($"Login Result: {(loginResult.Successful ? "Success" : "Failed")}");
+            Log.Verbose($"Login Result: {(loginResult.Successful ? "Success" : "Failed")}");
             if (loginResult.Successful)
             {
                 Log.Information($"Connected as Player: {playerName} playing {GameName}");
             }
             else
             {
-                Log.Information($"Login failed.");
+                Log.Error($"Login failed.");
                 return;
             }
             var currentSlot = CurrentSession.ConnectionInfo.Slot;
@@ -132,7 +157,7 @@ namespace Archipelago.Core
             }
             else
             {
-                Log.Information("No options found.");
+                Log.Warning("No options found.");
             }
             IsLoggedIn = true;
             Connected?.Invoke(this, new ConnectionChangedEventArgs(true));
@@ -203,7 +228,7 @@ namespace Archipelago.Core
 
                 if (!cancellationToken.IsCancellationRequested)
                 {
-                    await SaveGameStateAsync(cancellationToken);
+                    await CheckAndTriggerEarlySave(cancellationToken);
                 }
             }
             finally
@@ -226,13 +251,12 @@ namespace Archipelago.Core
             await Task.WhenAll(tasks);
 
         }
-        public void AddOverlayMessage(string message, TimeSpan? duration = null, CancellationToken cancellationToken = default)
+        public void AddOverlayMessage(string message, CancellationToken cancellationToken = default)
         {
             if (isOverlayEnabled)
             {
                 cancellationToken = CombineTokens(cancellationToken);
-                if (!duration.HasValue) duration = TimeSpan.FromSeconds(5);
-                OverlayService.AddTextPopup(message, new Util.Overlay.Color(0, 0, 0), duration.Value.TotalSeconds);
+                OverlayService.AddTextPopup(message);
             }
         }
         private async Task MonitorBatch(List<Location> batch, CancellationToken token)
@@ -271,7 +295,7 @@ namespace Archipelago.Core
             cancellationToken = CombineTokens(cancellationToken);
             if (CurrentSession == null)
             {
-                Log.Information("Must be connected and logged in to send locations.");
+                Log.Error("Must be connected and logged in to send locations.");
                 return;
             }
             if (EnableLocationsCondition?.Invoke() ?? true)
@@ -287,35 +311,103 @@ namespace Archipelago.Core
                 Log.Debug("Location precondition not met, location not sent");
             }
         }
+        private async void PeriodicGameStateUpdate(object state)
+        {
+            await PerformGameStateUpdate(_cancellationTokenSource.Token);
+        }
+        private async Task PerformGameStateUpdate(CancellationToken cancellationToken)
+        {
+            try
+            {
+                await SaveGameStateAsync(cancellationToken);
 
+                await LoadGameStateAsync(cancellationToken);
+                _lastGameStateUpdate = DateTime.UtcNow;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error in game state update: {ex.Message}");
+            }
+        }
+        private async Task CheckAndTriggerEarlySave(CancellationToken cancellationToken)
+        {
+            var timeSinceLastUpdate = DateTime.UtcNow - _lastGameStateUpdate;
+
+            // If we're in the buffer zone (less than 50 seconds until next save)
+            if (timeSinceLastUpdate >= TimeSpan.FromSeconds(10))
+            {
+                Log.Verbose($"Performing immediate save");
+                await PerformGameStateUpdate(cancellationToken);
+            }
+            else
+            {
+                Log.Verbose($"Skipping duplicate save");
+            }
+        }
+        private async Task ForceSaveAsync()
+        {
+            await PerformGameStateUpdate(_cancellationTokenSource.Token);
+            Log.Debug("Force save completed");
+        }
         public async Task SaveGameStateAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken = CombineTokens(cancellationToken);
-            if (CurrentSession == null) return;
+            if (CurrentSession == null || GameState == null) return;
             Log.Debug($"Saving game state");
 
             try
             {
                 var dataStorage = await CurrentSession.DataStorage.GetSlotDataAsync(CurrentSession.ConnectionInfo.Slot);
-                await CurrentSession.Socket.SendPacketAsync(new SetPacket()
-                {
-                    Key = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}_GameState",
-                    WantReply = true,
-                    DefaultValue = JObject.FromObject(new Dictionary<string, object>()),
-                    Operations = new[] {
-                        new OperationSpecification()
-                        {
-                            OperationType = OperationType.Replace,
-                            Value = JToken.FromObject(new Dictionary<string, object>{ { "GameState", GameState } })
-                        }
-                    }
-                });
+                await CurrentSession.Socket.SendPacketAsync(CreateSetPacket("GameState", GameState));
+                await CurrentSession.Socket.SendPacketAsync(CreateSetPacket("CustomValues", CustomValues));
 
             }
             catch (Exception ex)
             {
                 Log.Logger.Error("Failed to save to datastorage");
             }
+        }
+        private void _gpsHandler_MapChanged(object? sender, MapChangedEventArgs e)
+        {
+            SaveGPSAsync();
+        }
+
+        private void _gpsHandler_PositionChanged(object? sender, PositionChangedEventArgs e)
+        {
+            SaveGPSAsync();
+        }
+        public async Task SaveGPSAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken = CombineTokens(cancellationToken);
+            if (CurrentSession == null || GameState == null) return;
+            Log.Debug($"Saving gps state");
+
+            try
+            {
+                var dataStorage = await CurrentSession.DataStorage.GetSlotDataAsync(CurrentSession.ConnectionInfo.Slot);
+                await CurrentSession.Socket.SendPacketAsync(CreateSetPacket("GPS", _gpsHandler.GetCurrentPosition()));
+
+            }
+            catch (Exception ex)
+            {
+                Log.Logger.Error("Failed to save to datastorage");
+            }
+        }
+        private SetPacket CreateSetPacket<T>(string key, T value)
+        {
+            return new SetPacket()
+            {
+                Key = $"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}_{key}",
+                WantReply = true,
+                DefaultValue = JObject.FromObject(new Dictionary<string, object>()),
+                Operations = new[] {
+                        new OperationSpecification()
+                        {
+                            OperationType = OperationType.Replace,
+                            Value = JToken.FromObject(new Dictionary<string, object>{ { key, value } })
+                        }
+                    }
+            };
         }
 
         public async Task LoadGameStateAsync(CancellationToken cancellationToken = default)
@@ -324,24 +416,43 @@ namespace Archipelago.Core
             Log.Debug($"Loading game state");
             try
             {
-
-                var dataStorage = CurrentSession.DataStorage[$"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}_GameState"];
-                var foo = await dataStorage.GetAsync<Dictionary<string, GameState>>();
-                var bar = foo["GameState"];
-                if (bar is GameState gameState)
+                (bool success, GameState data) = await GetFromDataStorageAsync<GameState>("GameState");
+                if (success) { GameState = data; }
+                else
                 {
-                    Log.Logger.Information("Loaded from datastorage");
-
-                    GameState = bar;
+                    Log.Warning("No existing GameState, Creating new GameState");
+                    GameState = new GameState();
                 }
 
+                (bool success2, Dictionary<string, object> data2) = await GetFromDataStorageAsync<Dictionary<string, object>>("CustomValues");
+                if (success2) CustomValues = data2;
             }
             catch
             {
-                Log.Information("No existing GameState, Creating new GameState");
                 GameState = new GameState();
             }
-            Log.Verbose($"Finished loading game state");
+        }
+        public async Task<(bool Success, T? Result)> GetFromDataStorageAsync<T>(string key)
+        {
+            try
+            {
+                var dataStorage = CurrentSession.DataStorage[$"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}_{key}"];
+                var foo = await dataStorage.GetAsync<Dictionary<string, T>>();
+                var bar = foo[key];
+
+                if (bar is T correctType)
+                {
+                    Log.Logger.Debug($"Loaded {key} from datastorage");
+                    return (true, correctType);
+                }
+
+                return (false, default(T?));
+            }
+            catch (Exception ex)
+            {
+                Log.Logger.Error($"Failed to load {key} from datastorage: {ex.Message}");
+                return (false, default(T?));
+            }
         }
         private CancellationToken CombineTokens(CancellationToken externalToken)
         {
@@ -363,10 +474,21 @@ namespace Archipelago.Core
         }
         public void Dispose()
         {
+
+            try
+            {
+                ForceSaveAsync().Wait(TimeSpan.FromSeconds(2));
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Could not perform final save: {ex.Message}");
+            }
+
             if (IsConnected)
             {
                 Disconnect();
             }
+            _gameStateTimer?.Dispose();
             OverlayService?.Hide();
             OverlayService?.Dispose();
             _cancellationTokenSource.Dispose();
