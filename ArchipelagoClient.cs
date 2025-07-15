@@ -162,7 +162,7 @@ namespace Archipelago.Core
             IsLoggedIn = true;
             Connected?.Invoke(this, new ConnectionChangedEventArgs(true));
             await LoadGameStateAsync(cancellationToken);
-            await ReceiveItems(cancellationToken);
+            await ReceiveItems(cancellationToken, true);
 
             return;
         }
@@ -201,7 +201,7 @@ namespace Archipelago.Core
             previousToken.Cancel();
             previousToken.Dispose();
         }
-        private async Task ReceiveItems(CancellationToken cancellationToken = default)
+        private async Task ReceiveItems(CancellationToken cancellationToken = default, bool isInitialLoad = false)
         {
 
             cancellationToken = CombineTokens(cancellationToken);
@@ -211,6 +211,9 @@ namespace Archipelago.Core
                 await LoadGameStateAsync(cancellationToken);
 
                 var newItemInfo = CurrentSession.Items.DequeueItem();
+                // For the initial client load, track how many of each item ID we've received to compare against the game state.
+                // This avoids duplicating received items.
+                Dictionary<long, int> receivedItemsCounts = new Dictionary<long, int>();
                 while (newItemInfo != null)
                 {
                     var item = new Item
@@ -218,10 +221,15 @@ namespace Archipelago.Core
                         Id = newItemInfo.ItemId,
                         Name = newItemInfo.ItemName,
                     };
-
-                    Log.Debug($"Adding new item {item.Name}");
-                    GameState.ReceivedItems.Add(item);
-                    ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
+                    int receivedItemCount = receivedItemsCounts.GetValueOrDefault(item.Id, 0);
+                    int currentQuantity = GameState.ReceivedItems.Where(x => x.Id == item.Id).Count();
+                    if (!isInitialLoad || currentQuantity < receivedItemCount)
+                    {
+                        Log.Debug($"Adding new item {item.Name}");
+                        GameState.ReceivedItems.Add(item);
+                        ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
+                    }
+                    receivedItemsCounts.Add(item.Id, receivedItemCount + 1);
 
                     newItemInfo = CurrentSession.Items.DequeueItem();
                 }
