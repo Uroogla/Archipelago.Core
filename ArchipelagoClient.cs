@@ -28,6 +28,9 @@ namespace Archipelago.Core
         public event EventHandler<MessageReceivedEventArgs>? MessageReceived;
         public event EventHandler<LocationCompletedEventArgs>? LocationCompleted;
         public Func<bool>? EnableLocationsCondition;
+        public int itemsReceivedLastSession { get; set; }
+        public int itemsReceivedCurrentSession { get; set; }
+        public bool isReadyToReceiveItems { get; set; }
         public ArchipelagoSession CurrentSession { get; set; }
         public GPSHandler GPSHandler
         {
@@ -69,6 +72,7 @@ namespace Archipelago.Core
             Memory.CurrentProcId = gameClient.ProcId;
             AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
             _gameStateTimer = new Timer(PeriodicGameStateUpdate, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+            this.isReadyToReceiveItems = false;
         }
         public void IntializeOverlayService(IOverlayService overlayService)
         {
@@ -159,9 +163,18 @@ namespace Archipelago.Core
             {
                 Log.Warning("No options found.");
             }
-            IsLoggedIn = true;
-            Connected?.Invoke(this, new ConnectionChangedEventArgs(true));
+
             await LoadGameStateAsync(cancellationToken);
+            if (CustomValues == null)
+            {
+                CustomValues = new Dictionary<string, object>();
+            }
+            itemsReceivedLastSession = int.Parse(CustomValues.GetValueOrDefault("checksProcessed", 0).ToString());
+            itemsReceivedCurrentSession = 0;
+
+            IsLoggedIn = true;
+            await Task.Run(() => Connected?.Invoke(this, new ConnectionChangedEventArgs(true)));
+            isReadyToReceiveItems = true;
             await ReceiveItems(cancellationToken);
 
             return;
@@ -203,7 +216,10 @@ namespace Archipelago.Core
         }
         private async Task ReceiveItems(CancellationToken cancellationToken = default)
         {
-
+            if (!isReadyToReceiveItems)
+            {
+                return;
+            }
             cancellationToken = CombineTokens(cancellationToken);
             await _receiveItemSemaphore.WaitAsync(cancellationToken);
             try
@@ -213,15 +229,23 @@ namespace Archipelago.Core
                 var newItemInfo = CurrentSession.Items.DequeueItem();
                 while (newItemInfo != null)
                 {
-                    var item = new Item
+                    itemsReceivedCurrentSession++;
+                    if (itemsReceivedCurrentSession > itemsReceivedLastSession)
                     {
-                        Id = newItemInfo.ItemId,
-                        Name = newItemInfo.ItemName,
-                    };
-
-                    Log.Debug($"Adding new item {item.Name}");
-                    GameState.ReceivedItems.Add(item);
-                    ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
+                        var item = new Item
+                        {
+                            Id = newItemInfo.ItemId,
+                            Name = newItemInfo.ItemName,
+                        };
+                        Log.Debug($"Adding new item {item.Name}");
+                        GameState.ReceivedItems.Add(item);
+                        ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
+                        CustomValues["checksProcessed"] = $"{itemsReceivedCurrentSession}";
+                        await SaveGameStateAsync();
+                    } else
+                    {
+                        Log.Debug($"Fast forwarding past previously received item {newItemInfo.ItemName}");
+                    }
 
                     newItemInfo = CurrentSession.Items.DequeueItem();
                 }
