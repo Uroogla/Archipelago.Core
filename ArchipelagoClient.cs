@@ -17,7 +17,6 @@ namespace Archipelago.Core
 {
     public class ArchipelagoClient : IDisposable
     {
-        private const int SaveLoadTimeoutMs = 5000;
         private readonly Timer _gameStateTimer;
         private DateTime _lastGameStateUpdate = DateTime.MinValue;
         public bool IsConnected { get; set; }
@@ -28,7 +27,6 @@ namespace Archipelago.Core
         public event EventHandler<MessageReceivedEventArgs>? MessageReceived;
         public event EventHandler<LocationCompletedEventArgs>? LocationCompleted;
         public Func<bool>? EnableLocationsCondition;
-        public int itemsReceivedLastSession { get; set; }
         public int itemsReceivedCurrentSession { get; set; }
         public bool isReadyToReceiveItems { get; set; }
         public ArchipelagoSession CurrentSession { get; set; }
@@ -51,8 +49,6 @@ namespace Archipelago.Core
                 }
             }
         }
-
-
 
         private string GameName { get; set; } = "";
         private string Seed { get; set; } = "";
@@ -96,6 +92,8 @@ namespace Archipelago.Core
                 CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;
                 CurrentSession.Items.ItemReceived += ItemReceivedHandler;
                 CurrentSession.Socket.SendPacket(new SetNotifyPacket() { Keys = new[] { "GameState" } });
+                CurrentSession.Socket.SendPacket(new SetNotifyPacket() { Keys = new[] { "CustomValues" } });
+                CurrentSession.Socket.SendPacket(new SetNotifyPacket() { Keys = new[] { "GPS" } });
                 IsConnected = true;
             }
             catch (Exception ex)
@@ -169,7 +167,6 @@ namespace Archipelago.Core
             {
                 CustomValues = new Dictionary<string, object>();
             }
-            itemsReceivedLastSession = int.Parse(CustomValues.GetValueOrDefault("checksProcessed", 0).ToString());
             itemsReceivedCurrentSession = 0;
 
             IsLoggedIn = true;
@@ -230,7 +227,7 @@ namespace Archipelago.Core
                 while (newItemInfo != null)
                 {
                     itemsReceivedCurrentSession++;
-                    if (itemsReceivedCurrentSession > itemsReceivedLastSession)
+                    if (itemsReceivedCurrentSession > GameState.LastCheckedIndex)
                     {
                         var item = new Item
                         {
@@ -240,7 +237,7 @@ namespace Archipelago.Core
                         Log.Debug($"Adding new item {item.Name}");
                         GameState.ReceivedItems.Add(item);
                         ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
-                        CustomValues["checksProcessed"] = $"{itemsReceivedCurrentSession}";
+                        GameState.LastCheckedIndex = itemsReceivedCurrentSession;
                         await SaveGameStateAsync();
                     } else
                     {
@@ -446,6 +443,7 @@ namespace Archipelago.Core
                 {
                     Log.Warning("No existing GameState, Creating new GameState");
                     GameState = new GameState();
+                    await SaveGameStateAsync(cancellationToken);
                 }
 
                 (bool success2, Dictionary<string, object> data2) = await GetFromDataStorageAsync<Dictionary<string, object>>("CustomValues");
@@ -474,7 +472,7 @@ namespace Archipelago.Core
             }
             catch (Exception ex)
             {
-                Log.Logger.Error($"Failed to load {key} from datastorage: {ex.Message}");
+                Log.Logger.Debug($"Failed to load {key} from datastorage: {ex.Message}");
                 return (false, default(T?));
             }
         }
@@ -489,6 +487,12 @@ namespace Archipelago.Core
                 _cancellationTokenSource.Token,
                 externalToken
             ).Token;
+        }
+        public async void ForceReloadAllItems()
+        {
+            GameState.ReceivedItems = new List<Item>();
+            GameState.LastCheckedIndex = 0;
+            await ForceSaveAsync();
         }
         public DeathLinkService EnableDeathLink()
         {
@@ -518,5 +522,6 @@ namespace Archipelago.Core
             _cancellationTokenSource.Dispose();
 
         }
+
     }
 }

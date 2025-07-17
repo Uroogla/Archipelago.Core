@@ -16,5 +16,6 @@ namespace Archipelago.Core.Models
         
         public List<Location> CompletedLocations { get; set; }
         public List<Item> ReceivedItems { get; set; }
+        public int LastCheckedIndex { get; set; }
     }
 }
