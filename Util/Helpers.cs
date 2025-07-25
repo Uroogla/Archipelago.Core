@@ -27,7 +27,7 @@ namespace Archipelago.Core.Util
             return jsonFile;
         }
 
-        public static bool CheckLocation(Location location)
+        internal static bool CheckLocation(Location location)
         {
             switch (location.CheckType)
             {
@@ -165,7 +165,7 @@ namespace Archipelago.Core.Util
                     {
                         nibbleValue = (byte)((currentNibbleValue >> 4) & 0x0F);
                     }
-                    else 
+                    else
                     {
                         nibbleValue = (byte)(currentNibbleValue & 0x0F);
                     }
@@ -193,6 +193,7 @@ namespace Archipelago.Core.Util
                     return false;
             }
             return false;
+
         }
         public static ulong ResolvePointer(ulong address, params ulong[] offsets)
         {
@@ -208,7 +209,7 @@ namespace Archipelago.Core.Util
             }
             return currentAddress;
         }
-        public static T ResolvePointer<T>(ulong address, Endianness endianness = Endianness.Little, params ulong[] offsets) where T: struct
+        public static T ResolvePointer<T>(ulong address, Endianness endianness = Endianness.Little, params ulong[] offsets) where T : struct
         {
             var lastAddress = ResolvePointer(address, offsets);
             return Memory.Read<T>(lastAddress, endianness);

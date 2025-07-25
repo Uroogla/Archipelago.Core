@@ -15,7 +15,9 @@ namespace Archipelago.Core.Models
         Short = 4,
         FalseBit = 5,
         Long = 6,
-        Nibble = 7
+        Nibble = 7,
+        AND = 8,
+        OR = 9
 
     }
 }

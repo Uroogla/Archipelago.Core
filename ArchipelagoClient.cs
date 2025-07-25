@@ -258,7 +258,7 @@ namespace Archipelago.Core
             }
         }
 
-        public async Task MonitorLocations(List<Location> locations, CancellationToken cancellationToken = default)
+        public async Task MonitorLocations(List<ILocation> locations, CancellationToken cancellationToken = default)
         {
             cancellationToken = CombineTokens(cancellationToken);
             var locationBatches = locations
@@ -280,9 +280,9 @@ namespace Archipelago.Core
                 OverlayService.AddTextPopup(message);
             }
         }
-        private async Task MonitorBatch(List<Location> batch, CancellationToken token)
+        private async Task MonitorBatch(List<ILocation> batch, CancellationToken token)
         {
-            List<Location> completed = [];
+            List<ILocation> completed = [];
             while (!batch.All(x => completed.Any(y => y.Id == x.Id)))
             {
                 if (token.IsCancellationRequested) return;
@@ -290,7 +290,7 @@ namespace Archipelago.Core
                 {
                     foreach (var location in batch)
                     {
-                        var isCompleted = Helpers.CheckLocation(location);
+                        var isCompleted = location.Check();// Helpers.CheckLocation(location);
                         if (isCompleted)
                         {
                             completed.Add(location);
@@ -311,7 +311,7 @@ namespace Archipelago.Core
                 await Task.Delay(500, token);
             }
         }
-        public async void SendLocation(Location location, CancellationToken cancellationToken = default)
+        public async void SendLocation(ILocation location, CancellationToken cancellationToken = default)
         {
             cancellationToken = CombineTokens(cancellationToken);
             if (CurrentSession == null)

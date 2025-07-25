@@ -1,4 +1,5 @@
 ﻿
+using Archipelago.Core.Json;
 using Archipelago.Core.Util;
 using Newtonsoft.Json;
 using System;
@@ -9,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace Archipelago.Core.Models
 {
-    public class Location
+    public class Location : ILocation
     {
         [JsonConverter(typeof(HexToULongConverter))]
         public ulong Address { get; set; }
@@ -23,5 +24,10 @@ namespace Archipelago.Core.Models
         public LocationCheckCompareType CompareType { get; set; }
         public string RangeStartValue { get; set; }
         public string RangeEndValue { get; set; }
+
+        public bool Check()
+        {
+            return Helpers.CheckLocation(this);
+        }
     }
 }

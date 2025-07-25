@@ -8,8 +8,8 @@ namespace Archipelago.Core.Models
 {
     public class LocationCompletedEventArgs : EventArgs
     {
-        public Location CompletedLocation { get; set; }
-        public LocationCompletedEventArgs(Location location)
+        public ILocation CompletedLocation { get; set; }
+        public LocationCompletedEventArgs(ILocation location)
         {
             CompletedLocation = location;
         }

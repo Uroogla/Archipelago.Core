@@ -10,11 +10,11 @@ namespace Archipelago.Core.Models
     {
         public GameState()
         {
-            CompletedLocations = new List<Location>();
+            CompletedLocations = new List<ILocation>();
             ReceivedItems = new List<Item>();
         }
         
-        public List<Location> CompletedLocations { get; set; }
+        public List<ILocation> CompletedLocations { get; set; }
         public List<Item> ReceivedItems { get; set; }
         public int LastCheckedIndex { get; set; }
     }
