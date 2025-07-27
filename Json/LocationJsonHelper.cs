@@ -14,7 +14,7 @@ namespace Archipelago.Core.Json
         public static LocationJsonHelper Instance => _instance ??= new LocationJsonHelper();
         private readonly JsonSerializerSettings _settings = new JsonSerializerSettings()
         {
-            Converters = { new LocationConverter(), new LocationListConverter() },
+            Converters = { new LocationConverter() },
             Formatting = Formatting.Indented 
         };
 

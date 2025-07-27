@@ -11,7 +11,7 @@ namespace Archipelago.Core.Json
 {
     internal class LocationConverter : JsonConverter<ILocation>
     {
-        public override bool CanWrite => true;
+        public override bool CanWrite => false;
 
         public override ILocation ReadJson(JsonReader reader, Type objectType, ILocation existingValue, bool hasExistingValue, JsonSerializer serializer)
         {
