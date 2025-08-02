@@ -28,17 +28,23 @@ namespace Archipelago.Core.Json
                 // If CheckType is AND or OR, deserialize as CompositeLocation
                 if (checkType == LocationCheckType.AND || checkType == LocationCheckType.OR)
                 {
-                    return jObject.ToObject<CompositeLocation>(serializer);
+                    var loc = new CompositeLocation();
+                    serializer.Populate(jObject.CreateReader(), loc);
+                    return loc;
                 }
                 else
                 {
                     // Otherwise, deserialize as regular Location
-                    return jObject.ToObject<Location>(serializer);
+                    var loc = new Location();
+                    serializer.Populate(jObject.CreateReader(), loc);
+                    return loc;
                 }
             }
 
             // Fallback to Location if CheckType is missing
-            return jObject.ToObject<Location>(serializer);
+            var defaultLoc = new Location();
+            serializer.Populate(jObject.CreateReader(), defaultLoc);
+            return defaultLoc;
         }
         public override void WriteJson(JsonWriter writer, ILocation value, JsonSerializer serializer)
         {

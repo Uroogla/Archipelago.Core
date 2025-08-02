@@ -137,6 +137,11 @@ namespace Archipelago.Core
         public async Task Login(string playerName, string password = null, CancellationToken cancellationToken = default)
         {
             cancellationToken = CombineTokens(cancellationToken);
+            if (!IsConnected)
+            {
+                Log.Error("Must be connected to the server to log in.  Please ensure your host is correct.");
+                return;
+            }
             var loginResult = await CurrentSession.LoginAsync(GameName, playerName, ItemsHandlingFlags.AllItems, Version.Parse("0.6.1"), password: password, requestSlotData: true);
             Log.Verbose($"Login Result: {(loginResult.Successful ? "Success" : "Failed")}");
             if (loginResult.Successful)
@@ -328,6 +333,7 @@ namespace Archipelago.Core
 
                 await CurrentSession.Locations.CompleteLocationChecksAsync([(long)location.Id]);
                 GameState.CompletedLocations.Add(location);
+                await SaveGameStateAsync(cancellationToken);
                 LocationCompleted?.Invoke(this, new LocationCompletedEventArgs(location));
             }
             else
@@ -462,9 +468,9 @@ namespace Archipelago.Core
             try
             {
                 var dataStorage = CurrentSession.DataStorage[$"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}_{key}"];
-                var foo = await dataStorage.GetAsync<Dictionary<string, string>>();
-                string bar = foo[key];
-                var type = JsonConvert.DeserializeObject<T>(bar, new JsonSerializerSettings()
+                var foo = await dataStorage.GetAsync<Dictionary<string, object>>();
+                object bar = foo[key];
+                var type = JsonConvert.DeserializeObject<T>(bar.ToString(), new JsonSerializerSettings()
                 {
                     Converters = { new LocationConverter() },
                     Formatting = Formatting.Indented
