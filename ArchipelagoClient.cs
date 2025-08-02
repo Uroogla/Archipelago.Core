@@ -1,4 +1,5 @@
-﻿using Archipelago.Core.Models;
+﻿using Archipelago.Core.Json;
+using Archipelago.Core.Models;
 using Archipelago.Core.Util;
 using Archipelago.Core.Util.GPS;
 using Archipelago.Core.Util.Overlay;
@@ -9,6 +10,7 @@ using Archipelago.MultiClient.Net.Helpers;
 using Archipelago.MultiClient.Net.MessageLog.Messages;
 using Archipelago.MultiClient.Net.Models;
 using Archipelago.MultiClient.Net.Packets;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Serilog;
 using System.Text.Json;
@@ -153,9 +155,9 @@ namespace Archipelago.Core
             {
                 if (optionData != null)
                 {
-                    _options = JsonSerializer.Deserialize<Dictionary<string, object>>(optionData.ToString());
+                    _options = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(optionData.ToString());
                 }
-                Log.Debug($"Options: \n\t{JsonSerializer.Serialize(optionData)}");
+                Log.Debug($"Options: \n\t{System.Text.Json.JsonSerializer.Serialize(optionData)}");
             }
             else
             {
@@ -239,7 +241,8 @@ namespace Archipelago.Core
                         ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
                         GameState.LastCheckedIndex = itemsReceivedCurrentSession;
                         await SaveGameStateAsync();
-                    } else
+                    }
+                    else
                     {
                         Log.Debug($"Fast forwarding past previously received item {newItemInfo.ItemName}");
                     }
@@ -437,7 +440,7 @@ namespace Archipelago.Core
             Log.Debug($"Loading game state");
             try
             {
-                (bool success, GameState data) = await GetFromDataStorageAsync<GameState>("GameState");
+                (bool success, GameState data) = await DeserializeFromDataStorageAsync<GameState>("GameState");
                 if (success) { GameState = data; }
                 else
                 {
@@ -452,6 +455,28 @@ namespace Archipelago.Core
             catch
             {
                 GameState = new GameState();
+            }
+        }
+        public async Task<(bool Success, T? Result)> DeserializeFromDataStorageAsync<T>(string key)
+        {
+            try
+            {
+                var dataStorage = CurrentSession.DataStorage[$"{GameName}_{CurrentSession.ConnectionInfo.Slot}_{Seed}_{key}"];
+                var foo = await dataStorage.GetAsync<Dictionary<string, string>>();
+                string bar = foo[key];
+                var type = JsonConvert.DeserializeObject<T>(bar, new JsonSerializerSettings()
+                {
+                    Converters = { new LocationConverter() },
+                    Formatting = Formatting.Indented
+                });
+
+                Log.Logger.Debug($"Loaded {key} from datastorage");
+                return (true, type);
+            }
+            catch (Exception ex)
+            {
+                Log.Logger.Debug($"Failed to load {key} from datastorage: {ex.Message}");
+                return (false, default(T?));
             }
         }
         public async Task<(bool Success, T? Result)> GetFromDataStorageAsync<T>(string key)

@@ -25,10 +25,10 @@ namespace Archipelago.Core.Util.Overlay
         private float _yOffset = 100;
         private SolidBrush _brush;
         private float _fadeDuration = 10.0f;
-		
-		private uint _frameCounter = 0;
+
+        private uint _frameCounter = 0;
         private const uint Z_ORDER_REFRESH_INTERVAL = 30;
-		
+
         public WindowsOverlayService(OverlayOptions options = null)
         {
             if (options != null)
@@ -84,7 +84,7 @@ namespace Archipelago.Core.Util.Overlay
         {
             if (_isDisposed || !_isInitialized) return;
             // Create a unique ID for this popup
-            var id = Guid.NewGuid();              
+            var id = Guid.NewGuid();
 
             // Create the popup
             var popup = new TextPopup
@@ -135,10 +135,10 @@ namespace Archipelago.Core.Util.Overlay
 
         private void OnDrawGraphics(object sender, DrawGraphicsEventArgs e)
         {
-			_frameCounter++;
-			
-			// Periodically refresh z-order to ensure overlay stays above target window
-            if (_targetWindowHandle != IntPtr.Zero && 
+            _frameCounter++;
+
+            // Periodically refresh z-order to ensure overlay stays above target window
+            if (_targetWindowHandle != IntPtr.Zero &&
                 _frameCounter % Z_ORDER_REFRESH_INTERVAL == 0)
             {
                 try
@@ -152,7 +152,7 @@ namespace Archipelago.Core.Util.Overlay
                     // Could add logging here if needed
                 }
             }
-			
+
             // Update window position in case target window moved
             if (_targetWindowHandle != IntPtr.Zero)
             {
@@ -226,6 +226,15 @@ namespace Archipelago.Core.Util.Overlay
             _window.Dispose();
 
             GC.SuppressFinalize(this);
+        }
+
+        public Font CreateFont(string pathToFont, int size)
+        {
+            var fontManager = new FontManager();
+            fontManager.LoadFontFromFile(pathToFont);
+            var fontFamily = fontManager.GetFontFamily();
+            return _gfx.CreateFont(fontFamily.Name, size);
+
         }
     }
 }
