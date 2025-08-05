@@ -58,6 +58,7 @@ namespace Archipelago.Core
         public Dictionary<string, object> Options { get { return _options; } }
         public GameState GameState { get; set; }
         public Dictionary<string, object> CustomValues { get; set; }
+        public bool ShouldSaveStateOnItemReceived { get; set; }
         private IOverlayService? OverlayService { get; set; }
 
         private readonly SemaphoreSlim _receiveItemSemaphore = new SemaphoreSlim(1, 1);
@@ -71,6 +72,7 @@ namespace Archipelago.Core
             AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
             _gameStateTimer = new Timer(PeriodicGameStateUpdate, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
             this.isReadyToReceiveItems = false;
+            this.ShouldSaveStateOnItemReceived = true;
         }
         public void IntializeOverlayService(IOverlayService overlayService)
         {
@@ -228,7 +230,10 @@ namespace Archipelago.Core
             await _receiveItemSemaphore.WaitAsync(cancellationToken);
             try
             {
-                await LoadGameStateAsync(cancellationToken);
+                if (this.ShouldSaveStateOnItemReceived)
+                {
+                    await LoadGameStateAsync(cancellationToken);
+                }
 
                 var newItemInfo = CurrentSession.Items.DequeueItem();
                 while (newItemInfo != null)
@@ -245,7 +250,10 @@ namespace Archipelago.Core
                         GameState.ReceivedItems.Add(item);
                         ItemReceived?.Invoke(this, new ItemReceivedEventArgs() { Item = item });
                         GameState.LastCheckedIndex = itemsReceivedCurrentSession;
-                        await SaveGameStateAsync();
+                        if (this.ShouldSaveStateOnItemReceived)
+                        {
+                            await SaveGameStateAsync();
+                        }
                     }
                     else
                     {
@@ -333,7 +341,10 @@ namespace Archipelago.Core
 
                 await CurrentSession.Locations.CompleteLocationChecksAsync([(long)location.Id]);
                 GameState.CompletedLocations.Add(location);
-                await SaveGameStateAsync(cancellationToken);
+                if (this.ShouldSaveStateOnItemReceived)
+                {
+                    await SaveGameStateAsync(cancellationToken);
+                }
                 LocationCompleted?.Invoke(this, new LocationCompletedEventArgs(location));
             }
             else
