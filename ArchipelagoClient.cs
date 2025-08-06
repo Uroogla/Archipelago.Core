@@ -164,7 +164,7 @@ namespace Archipelago.Core
                 {
                     _options = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(optionData.ToString());
                 }
-                Log.Debug($"Options: \n\t{System.Text.Json.JsonSerializer.Serialize(optionData)}");
+                Log.Verbose($"Options: \n\t{System.Text.Json.JsonSerializer.Serialize(optionData)}");
             }
             else
             {
@@ -318,7 +318,7 @@ namespace Archipelago.Core
                         foreach (var location in completed)
                         {
                             SendLocation(location, token);
-                            Log.Information($"{location.Name} ({location.Id}) Completed");
+                            Log.Debug($"{location.Name} ({location.Id}) Completed");
                             batch.Remove(location);
                         }
                     }
@@ -487,7 +487,7 @@ namespace Archipelago.Core
                     Formatting = Formatting.Indented
                 });
 
-                Log.Logger.Debug($"Loaded {key} from datastorage");
+                Log.Logger.Verbose($"Loaded {key} from datastorage");
                 return (true, type);
             }
             catch (Exception ex)
@@ -506,7 +506,7 @@ namespace Archipelago.Core
 
                 if (bar is T correctType)
                 {
-                    Log.Logger.Debug($"Loaded {key} from datastorage");
+                    Log.Logger.Verbose($"Loaded {key} from datastorage");
                     return (true, correctType);
                 }
 
