@@ -64,7 +64,7 @@ namespace Archipelago.Core
         private readonly SemaphoreSlim _receiveItemSemaphore = new SemaphoreSlim(1, 1);
         private bool isOverlayEnabled = false;
         private GPSHandler _gpsHandler;
-        private const int BATCH_SIZE = 25;
+        private const int BATCH_SIZE = 100;
         private CancellationTokenSource _cancellationTokenSource { get; set; } = new CancellationTokenSource();
         public ArchipelagoClient(IGameClient gameClient)
         {
@@ -324,7 +324,7 @@ namespace Archipelago.Core
                     }
                     completed.Clear();
                 }
-                await Task.Delay(500, token);
+                await Task.Delay(1000, token);
             }
         }
         public async void SendLocation(ILocation location, CancellationToken cancellationToken = default)
@@ -345,6 +345,7 @@ namespace Archipelago.Core
                 {
                     await SaveGameStateAsync(cancellationToken);
                 }
+                // TODO: Avoid overwhelming server.
                 LocationCompleted?.Invoke(this, new LocationCompletedEventArgs(location));
             }
             else
@@ -361,8 +362,6 @@ namespace Archipelago.Core
             try
             {
                 await SaveGameStateAsync(cancellationToken);
-
-                await LoadGameStateAsync(cancellationToken);
                 _lastGameStateUpdate = DateTime.UtcNow;
             }
             catch (Exception ex)
