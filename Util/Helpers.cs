@@ -135,6 +135,28 @@ namespace Archipelago.Core.Util
                         return (currentShortValue <= Convert.ToInt16(location.RangeEndValue) && currentShortValue >= Convert.ToInt16(location.RangeStartValue));
                     }
                     break;
+                case (LocationCheckType.UShort):
+                    var currentUShortValue = Memory.ReadUShort(location.Address);
+                    if (location.CompareType == LocationCheckCompareType.Match)
+                    {
+                        return currentUShortValue == Convert.ToUInt16(location.CheckValue);
+
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.GreaterThan)
+                    {
+                        return currentUShortValue > Convert.ToUInt16(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.LessThan)
+                    {
+                        return currentUShortValue < Convert.ToUInt16(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.Range)
+                    {
+                        if (string.IsNullOrWhiteSpace(location.RangeEndValue)) throw new ArgumentException("RangeEndValue must be provided for location check type Range");
+                        if (string.IsNullOrWhiteSpace(location.RangeStartValue)) throw new ArgumentException("RangeStartValue must be provided for location check type Range");
+                        return (currentUShortValue <= Convert.ToUInt16(location.RangeEndValue) && currentUShortValue >= Convert.ToUInt16(location.RangeStartValue));
+                    }
+                    break;
                 case (LocationCheckType.Long):
                     var currentLongValue = Memory.ReadLong(location.Address);
                     if (location.CompareType == LocationCheckCompareType.Match)
@@ -155,6 +177,29 @@ namespace Archipelago.Core.Util
                         if (string.IsNullOrWhiteSpace(location.RangeEndValue)) throw new ArgumentException("RangeEndValue must be provided for location check type Range");
                         if (string.IsNullOrWhiteSpace(location.RangeStartValue)) throw new ArgumentException("RangeStartValue must be provided for location check type Range");
                         return (currentLongValue <= Convert.ToInt64(location.RangeEndValue) && currentLongValue >= Convert.ToInt64(location.RangeStartValue));
+                    }
+                    break;
+
+                case (LocationCheckType.ULong):
+                    var currentULongValue = Memory.ReadULong(location.Address);
+                    if (location.CompareType == LocationCheckCompareType.Match)
+                    {
+                        return currentULongValue == Convert.ToUInt64(location.CheckValue);
+
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.GreaterThan)
+                    {
+                        return currentULongValue > Convert.ToUInt64(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.LessThan)
+                    {
+                        return currentULongValue < Convert.ToUInt64(location.CheckValue);
+                    }
+                    else if (location.CompareType == LocationCheckCompareType.Range)
+                    {
+                        if (string.IsNullOrWhiteSpace(location.RangeEndValue)) throw new ArgumentException("RangeEndValue must be provided for location check type Range");
+                        if (string.IsNullOrWhiteSpace(location.RangeStartValue)) throw new ArgumentException("RangeStartValue must be provided for location check type Range");
+                        return (currentULongValue <= Convert.ToUInt64(location.RangeEndValue) && currentULongValue >= Convert.ToUInt64(location.RangeStartValue));
                     }
                     break;
                 case (LocationCheckType.Nibble):

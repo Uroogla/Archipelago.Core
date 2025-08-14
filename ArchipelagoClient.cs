@@ -64,7 +64,7 @@ namespace Archipelago.Core
         private readonly SemaphoreSlim _receiveItemSemaphore = new SemaphoreSlim(1, 1);
         private bool isOverlayEnabled = false;
         private GPSHandler _gpsHandler;
-        private const int BATCH_SIZE = 25;
+        private const int BATCH_SIZE = 100;
         private CancellationTokenSource _cancellationTokenSource { get; set; } = new CancellationTokenSource();
         public ArchipelagoClient(IGameClient gameClient)
         {
@@ -188,6 +188,7 @@ namespace Archipelago.Core
         public async void SendMessage(string message, CancellationToken cancellationToken = default)
         {
             cancellationToken = CombineTokens(cancellationToken);
+            if (CurrentSession == null) return;
             await CurrentSession.Socket.SendPacketAsync(new SayPacket() { Text = message });
 
         }
@@ -222,7 +223,7 @@ namespace Archipelago.Core
         }
         private async Task ReceiveItems(CancellationToken cancellationToken = default)
         {
-            if (!isReadyToReceiveItems)
+            if (!isReadyToReceiveItems || CurrentSession == null || GameState == null)
             {
                 return;
             }
@@ -301,7 +302,7 @@ namespace Archipelago.Core
             List<ILocation> completed = [];
             while (!batch.All(x => completed.Any(y => y.Id == x.Id)))
             {
-                if (token.IsCancellationRequested) return;
+                if (token.IsCancellationRequested || GameState == null || CurrentSession == null) return;
                 if (EnableLocationsCondition?.Invoke() ?? true)
                 {
                     foreach (var location in batch)
@@ -324,13 +325,13 @@ namespace Archipelago.Core
                     }
                     completed.Clear();
                 }
-                await Task.Delay(500, token);
+                await Task.Delay(1000, token);
             }
         }
         public async void SendLocation(ILocation location, CancellationToken cancellationToken = default)
         {
             cancellationToken = CombineTokens(cancellationToken);
-            if (CurrentSession == null)
+            if (CurrentSession == null || GameState == null)
             {
                 Log.Error("Must be connected and logged in to send locations.");
                 return;
@@ -345,6 +346,7 @@ namespace Archipelago.Core
                 {
                     await SaveGameStateAsync(cancellationToken);
                 }
+                // TODO: Avoid overwhelming server.
                 LocationCompleted?.Invoke(this, new LocationCompletedEventArgs(location));
             }
             else
@@ -361,8 +363,6 @@ namespace Archipelago.Core
             try
             {
                 await SaveGameStateAsync(cancellationToken);
-
-                await LoadGameStateAsync(cancellationToken);
                 _lastGameStateUpdate = DateTime.UtcNow;
             }
             catch (Exception ex)
@@ -393,8 +393,8 @@ namespace Archipelago.Core
         public async Task SaveGameStateAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken = CombineTokens(cancellationToken);
-            if (CurrentSession == null || GameState == null) return;
-            Log.Debug($"Saving game state");
+            if (!IsConnected || !IsLoggedIn || CurrentSession == null || GameState == null) return;
+            Log.Debug($"Saving game state {_lastGameStateUpdate}");
 
             try
             {
