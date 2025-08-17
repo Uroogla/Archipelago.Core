@@ -17,7 +17,9 @@ namespace Archipelago.Core.Models
         Long = 6,
         Nibble = 7,
         AND = 8,
-        OR = 9
+        OR = 9,
+        UShort = 10,
+        ULong = 11
 
     }
 }
