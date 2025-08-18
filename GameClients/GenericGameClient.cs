@@ -20,11 +20,11 @@ namespace Archipelago.Core.GameClients
 
         public bool Connect()
         {
-            Log.Information($"Connecting to {ProcessName}");
+            Log.Verbose($"Connecting to {ProcessName}");
             var pid = ProcId;
             if (pid == 0)
             {
-                Log.Warning($"{ProcessName} not found.");
+                Log.Error($"{ProcessName} not found.");
                 IsConnected = false;
             }
             else IsConnected = true;

@@ -1,5 +1,6 @@
 ﻿using Archipelago.Core;
 using Archipelago.Core.Util;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -21,10 +22,10 @@ namespace Archipelago.Core.GameClients
 
         public bool Connect()
         {
-            Console.WriteLine($"Connecting to {ProcessName}");
+            Log.Verbose($"Connecting to {ProcessName}");
             if (ProcId == 0)
             {
-                Console.WriteLine($"{ProcessName} not found.");
+                Log.Error($"{ProcessName} not found.");
                 return false;
             }
             return true;

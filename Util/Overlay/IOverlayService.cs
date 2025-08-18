@@ -14,7 +14,6 @@ namespace Archipelago.Core.Util.Overlay
         void Show();
         void Hide();
         void AddTextPopup(string text);
-        void CreateFont(string fontName, float size, bool setActive = false);
        
     }
 }

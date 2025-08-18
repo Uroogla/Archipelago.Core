@@ -25,17 +25,16 @@ namespace Archipelago.Core.Util.Overlay
         private float _yOffset = 100;
         private SolidBrush _brush;
         private float _fadeDuration = 10.0f;
-        private TextFormat _currentTextFormat;
         private uint _frameCounter = 0;
         private const uint Z_ORDER_REFRESH_INTERVAL = 30;
-        private FontManager _fontManager = new FontManager();
+        private GameOverlay.Drawing.Font _selectedFont;
         public WindowsOverlayService(OverlayOptions options = null)
         {
             if (options != null)
             {
                 if (options.FontSize != 0) _fontSize = options.FontSize;
                 if (options.TextColor != null) _textColor = options.TextColor;
-                if (options.Font != null) CreateFont(options.Font.FontFamilyName, _fontSize, true);
+                if (options.Font != null) _selectedFont = options.Font;
                 _xOffset = options.XOffset;
                 _yOffset = options.YOffset;
                 _fadeDuration = options.FadeDuration;
@@ -106,25 +105,16 @@ namespace Archipelago.Core.Util.Overlay
                     _popups.TryRemove(id, out var ignore);
                 });
         }
-        public void CreateFont(string fontName, float size = 12, bool setActive = false)
-        {
-            var textFormat = _fontManager.CreateFont(fontName, size);
-            
-            if (setActive)
-            {
-                _currentTextFormat = textFormat;                
-            }
-        }
+
         private void OnSetupGraphics(object sender, SetupGraphicsEventArgs e)
         {
             _gfx = e.Graphics;
-            _gfx.GetFontFactory().RegisterFontCollectionLoader(_fontManager.GetFontLoader());
             // Initialize resources once we have graphics
             if (!_isInitialized)
             {
-                if (_currentTextFormat == null)
+                if (_selectedFont == null)
                 {
-                   CreateFont("Arial", _fontSize, true);
+                   _selectedFont = _gfx.CreateFont("Arial", _fontSize);
                 }
 
                 var color = new GameOverlay.Drawing.Color(
@@ -200,7 +190,7 @@ namespace Archipelago.Core.Util.Overlay
                     var fadeProgress = (elapsed - fadeStartTime) / (popup.Duration - fadeStartTime);
                     popup.Opacity = Math.Max(0, 1.0f - (float)fadeProgress);
                 }
-                popup.TextFormat = _currentTextFormat;
+                popup.Font = _selectedFont;
                 popup.Brush = _brush;
 
                 // Draw the text with current opacity
@@ -211,8 +201,7 @@ namespace Archipelago.Core.Util.Overlay
                     originalColor.B,
                     originalColor.A * popup.Opacity
                 );
-                var font = _gfx.CreateFont(_currentTextFormat.FontFamilyName, _currentTextFormat.FontSize, _currentTextFormat.FontWeight == FontWeight.Bold, _currentTextFormat.FontStyle == FontStyle.Italic, true );
-                e.Graphics.DrawText(font, popup.Brush, _xOffset, _yOffset - (index * (_fontSize + 3)), popup.Text);
+                e.Graphics.DrawText(_selectedFont, popup.Brush, _xOffset, _yOffset - (index * (_fontSize + 3)), popup.Text);
                 _brush.Color = originalColor;
                 index++;
             }

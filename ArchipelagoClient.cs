@@ -352,6 +352,11 @@ namespace Archipelago.Core
                 Log.Error("Must be connected and logged in to send locations.");
                 return;
             }
+			if(GameState?.CompletedLocations == null)
+			{
+				Log.Error("Could not send location, GameState is null.");
+                return;
+			}
             if (EnableLocationsCondition?.Invoke() ?? true)
             {
                 Log.Debug($"Marking location {location.Id} as complete");
@@ -479,7 +484,7 @@ namespace Archipelago.Core
                 else
                 {
                     Log.Warning("No existing GameState, Creating new GameState");
-                    GameState = new GameState();
+                    GameState = new GameState(){LastCheckedIndex = 0};
                     await SaveGameStateAsync(cancellationToken);
                 }
 
@@ -488,6 +493,7 @@ namespace Archipelago.Core
             }
             catch
             {
+				Log.Warning("An unhandled exception occurred when loading GameState. Creating new GameState.");
                 GameState = new GameState();
             }
         }
