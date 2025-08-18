@@ -1,7 +1,7 @@
-﻿using System;
+﻿using SharpDX.DirectWrite;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Text;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -11,24 +11,24 @@ namespace Archipelago.Core.Util.Overlay
 {
     public class FontManager
     {
-        private PrivateFontCollection privateFonts = new PrivateFontCollection();
+        private SharpDX.DirectWrite.Factory _directWriteFactory;
+        private ResourceFontLoader _resourceFontLoader;
+        private FontCollection _currentFontCollection;
 
-        public void LoadFontFromFile(string fontPath)
+        public FontManager()
         {
-            privateFonts.AddFontFile(fontPath);
+           _directWriteFactory = new SharpDX.DirectWrite.Factory();
+           _resourceFontLoader = new ResourceFontLoader(_directWriteFactory);
+           _currentFontCollection = new FontCollection(_directWriteFactory, _resourceFontLoader, _resourceFontLoader.Key);
+        }
+        public ResourceFontLoader GetFontLoader()
+        {
+            return _resourceFontLoader;
+        }
+        public TextFormat CreateFont(string fontName, float size)
+        {
+            return new TextFormat(_directWriteFactory, fontName, _currentFontCollection, FontWeight.Normal, SharpDX.DirectWrite.FontStyle.Normal, FontStretch.Normal, size);
         }
 
-        public void LoadFontFromMemory(byte[] fontData)
-        {
-            IntPtr fontPtr = Marshal.AllocCoTaskMem(fontData.Length);
-            Marshal.Copy(fontData, 0, fontPtr, fontData.Length);
-            privateFonts.AddMemoryFont(fontPtr, fontData.Length);
-            Marshal.FreeCoTaskMem(fontPtr);
-        }
-
-        public FontFamily GetFontFamily(int index = 0)
-        {
-            return privateFonts.Families[index];
-        }
     }
 }

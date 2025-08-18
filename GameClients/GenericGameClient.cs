@@ -1,11 +1,12 @@
 ﻿using Archipelago.Core.Util;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Archipelago.Core.Models
+namespace Archipelago.Core.GameClients
 {
     public class GenericGameClient : IGameClient
     {
@@ -19,17 +20,15 @@ namespace Archipelago.Core.Models
 
         public bool Connect()
         {
-            Console.WriteLine($"Connecting to {ProcessName}");
+            Log.Information($"Connecting to {ProcessName}");
             var pid = ProcId;
             if (pid == 0)
             {
-                Console.WriteLine($"{ProcessName} not found.");
-                Console.WriteLine("Press any key to exit.");
-                Console.Read();
-                System.Environment.Exit(0);
-                return false;
+                Log.Warning($"{ProcessName} not found.");
+                IsConnected = false;
             }
-            return true;
+            else IsConnected = true;
+            return IsConnected;
         }
     }
 }

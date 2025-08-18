@@ -1,5 +1,6 @@
 ﻿using GameOverlay.Drawing;
 using GameOverlay.Windows;
+using SharpDX.DirectWrite;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -18,24 +19,23 @@ namespace Archipelago.Core.Util.Overlay
         private bool _isInitialized = false;
         private bool _isDisposed = false;
         private IntPtr _targetWindowHandle;
-        private Font _selectedFont = null;
         private float _fontSize = 14;
         private IColor _textColor = Color.White;
         private float _xOffset = 100;
         private float _yOffset = 100;
         private SolidBrush _brush;
         private float _fadeDuration = 10.0f;
-
+        private TextFormat _currentTextFormat;
         private uint _frameCounter = 0;
         private const uint Z_ORDER_REFRESH_INTERVAL = 30;
-
+        private FontManager _fontManager = new FontManager();
         public WindowsOverlayService(OverlayOptions options = null)
         {
             if (options != null)
             {
-                if (options.Font != null) _selectedFont = options.Font;
                 if (options.FontSize != 0) _fontSize = options.FontSize;
                 if (options.TextColor != null) _textColor = options.TextColor;
+                if (options.Font != null) CreateFont(options.Font.FontFamilyName, _fontSize, true);
                 _xOffset = options.XOffset;
                 _yOffset = options.YOffset;
                 _fadeDuration = options.FadeDuration;
@@ -106,19 +106,26 @@ namespace Archipelago.Core.Util.Overlay
                     _popups.TryRemove(id, out var ignore);
                 });
         }
-
+        public void CreateFont(string fontName, float size = 12, bool setActive = false)
+        {
+            var textFormat = _fontManager.CreateFont(fontName, size);
+            
+            if (setActive)
+            {
+                _currentTextFormat = textFormat;                
+            }
+        }
         private void OnSetupGraphics(object sender, SetupGraphicsEventArgs e)
         {
             _gfx = e.Graphics;
-
+            _gfx.GetFontFactory().RegisterFontCollectionLoader(_fontManager.GetFontLoader());
             // Initialize resources once we have graphics
             if (!_isInitialized)
             {
-                if (_selectedFont != null)
+                if (_currentTextFormat == null)
                 {
-                    _selectedFont = _gfx.CreateFont(_selectedFont.FontFamilyName, _fontSize);
+                   CreateFont("Arial", _fontSize, true);
                 }
-                else _selectedFont = _gfx.CreateFont("Arial", _fontSize);
 
                 var color = new GameOverlay.Drawing.Color(
                     _textColor.R,
@@ -193,7 +200,7 @@ namespace Archipelago.Core.Util.Overlay
                     var fadeProgress = (elapsed - fadeStartTime) / (popup.Duration - fadeStartTime);
                     popup.Opacity = Math.Max(0, 1.0f - (float)fadeProgress);
                 }
-                popup.Font = _selectedFont;
+                popup.TextFormat = _currentTextFormat;
                 popup.Brush = _brush;
 
                 // Draw the text with current opacity
@@ -204,7 +211,8 @@ namespace Archipelago.Core.Util.Overlay
                     originalColor.B,
                     originalColor.A * popup.Opacity
                 );
-                e.Graphics.DrawText(popup.Font, popup.Brush, _xOffset, _yOffset - (index * (_fontSize + 3)), popup.Text);
+                var font = _gfx.CreateFont(_currentTextFormat.FontFamilyName, _currentTextFormat.FontSize, _currentTextFormat.FontWeight == FontWeight.Bold, _currentTextFormat.FontStyle == FontStyle.Italic, true );
+                e.Graphics.DrawText(font, popup.Brush, _xOffset, _yOffset - (index * (_fontSize + 3)), popup.Text);
                 _brush.Color = originalColor;
                 index++;
             }
@@ -212,7 +220,6 @@ namespace Archipelago.Core.Util.Overlay
 
         private void OnDestroyGraphics(object sender, DestroyGraphicsEventArgs e)
         {
-            _selectedFont?.Dispose();
             _brush?.Dispose();
             _isInitialized = false;
         }
@@ -228,13 +235,6 @@ namespace Archipelago.Core.Util.Overlay
             GC.SuppressFinalize(this);
         }
 
-        public Font CreateFont(string pathToFont, int size)
-        {
-            var fontManager = new FontManager();
-            fontManager.LoadFontFromFile(pathToFont);
-            var fontFamily = fontManager.GetFontFamily();
-            return _gfx.CreateFont(fontFamily.Name, size);
 
-        }
     }
 }

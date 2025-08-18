@@ -20,6 +20,7 @@ namespace Archipelago.Core
     public class ArchipelagoClient : IDisposable
     {
         private readonly Timer _gameStateTimer;
+        private readonly Timer _gameClientPollTimer;
         private DateTime _lastGameStateUpdate = DateTime.MinValue;
         public bool IsConnected { get; set; }
         public bool IsLoggedIn { get; set; }
@@ -28,6 +29,7 @@ namespace Archipelago.Core
         public event EventHandler<ConnectionChangedEventArgs>? Connected;
         public event EventHandler<MessageReceivedEventArgs>? MessageReceived;
         public event EventHandler<LocationCompletedEventArgs>? LocationCompleted;
+        public event EventHandler? GameDisconnected;
         public Func<bool>? EnableLocationsCondition;
         public int itemsReceivedCurrentSession { get; set; }
         public bool isReadyToReceiveItems { get; set; }
@@ -65,15 +67,30 @@ namespace Archipelago.Core
         private bool isOverlayEnabled = false;
         private GPSHandler _gpsHandler;
         private const int BATCH_SIZE = 25;
+        private IGameClient _gameClient;
         private CancellationTokenSource _cancellationTokenSource { get; set; } = new CancellationTokenSource();
         public ArchipelagoClient(IGameClient gameClient)
         {
             Memory.CurrentProcId = gameClient.ProcId;
             AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
+            _gameClient = gameClient;
             _gameStateTimer = new Timer(PeriodicGameStateUpdate, null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+            _gameClientPollTimer = new Timer(PeriodicGameClientConnectionCheck, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
             this.isReadyToReceiveItems = false;
             this.ShouldSaveStateOnItemReceived = true;
         }
+
+        private void PeriodicGameClientConnectionCheck(object? state)
+        {
+            var isConnected = _gameClient.Connect();
+            if (!isConnected)
+            {
+                Log.Warning("Connection to game lost, disconnecting from Archipelago");
+                GameDisconnected?.Invoke(this, EventArgs.Empty);
+                Disconnect();
+            }
+        }
+
         public void IntializeOverlayService(IOverlayService overlayService)
         {
             OverlayService = overlayService;
@@ -558,6 +575,7 @@ namespace Archipelago.Core
             {
                 Disconnect();
             }
+            _gameClientPollTimer?.Dispose();
             _gameStateTimer?.Dispose();
             OverlayService?.Hide();
             OverlayService?.Dispose();
