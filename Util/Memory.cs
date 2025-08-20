@@ -21,6 +21,8 @@ namespace Archipelago.Core.Util
     {
         #region Platform Implementation
         internal static readonly IMemory PlatformImpl;
+        private static nint _currentHandle;
+        private static int _currentProcessId = 0;
 
         static Memory()
         {
@@ -49,6 +51,22 @@ namespace Archipelago.Core.Util
         #region Process Management
         public static int CurrentProcId { get; set; }
         public static ulong GlobalOffset { get; set; } = 0;
+        public static IntPtr CurrentHandle()
+        {
+            if (_currentHandle == IntPtr.Zero || _currentProcessId != CurrentProcId)
+            {
+                _currentHandle = GetProcessH(CurrentProcId);
+                _currentProcessId = CurrentProcId;
+            }
+            return (nint)_currentHandle;
+        }
+        public static void CloseCurrentHandle()
+        {
+            if (_currentHandle != IntPtr.Zero)
+            {
+                PlatformImpl.CloseHandle(_currentHandle);
+            }
+        }
         internal static IntPtr GetProcessH(int proc)
         {
             if (proc == 0) throw new ArgumentException("CurrentProcId has not been set");
@@ -70,7 +88,7 @@ namespace Archipelago.Core.Util
             else
             {
                 //application is not running
-                PlatformImpl.CloseHandle(GetProcessH(CurrentProcId));
+                PlatformImpl.CloseHandle(CurrentHandle());
                 return 0;
             }
         }
@@ -114,7 +132,7 @@ namespace Archipelago.Core.Util
         {
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
             byte[] buffer = new byte[1];
-            PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, buffer, buffer.Length, out _);
+            PlatformImpl.ReadProcessMemory(CurrentHandle(), address + GlobalOffset, buffer, buffer.Length, out _);
             return buffer[0];
         }
 
@@ -122,7 +140,7 @@ namespace Archipelago.Core.Util
         {
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
             byte[] buffer = new byte[length];
-            PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, buffer, buffer.Length, out _);
+            PlatformImpl.ReadProcessMemory(CurrentHandle(), address + GlobalOffset, buffer, buffer.Length, out _);
             if (endianness == Endianness.Big && BitConverter.IsLittleEndian ||
                 endianness == Endianness.Little && !BitConverter.IsLittleEndian)
             {
@@ -141,7 +159,7 @@ namespace Archipelago.Core.Util
                 {
                     throw new NullReferenceException();
                 }
-                PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, buffer, size, out _);
+                PlatformImpl.ReadProcessMemory(CurrentHandle(), address + GlobalOffset, buffer, size, out _);
                 return (T)Marshal.PtrToStructure(handle.AddrOfPinnedObject(), typeof(T));
             }
             finally
@@ -150,7 +168,7 @@ namespace Archipelago.Core.Util
             }
         }
         public static List<T> ReadStructs<T>(ulong address, int numStructs)
-        { 
+        {
             int size = Marshal.SizeOf(typeof(T));
             byte[] buffer = new byte[size * numStructs]; // Allocate the buffer
             GCHandle handle = GCHandle.Alloc(buffer, GCHandleType.Pinned); // Pin the buffer
@@ -161,7 +179,7 @@ namespace Archipelago.Core.Util
                 {
                     throw new NullReferenceException();
                 }
-                PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, buffer, numStructs* size, out _);
+                PlatformImpl.ReadProcessMemory(CurrentHandle(), address + GlobalOffset, buffer, numStructs * size, out _);
                 IntPtr basePtr = handle.AddrOfPinnedObject();
                 for (int i = 0; i < numStructs; i++)
                 {
@@ -398,7 +416,7 @@ namespace Archipelago.Core.Util
         public static bool Write(ulong address, byte[] value)
         {
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
-            return PlatformImpl.WriteProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, value, value.Length, out _);
+            return PlatformImpl.WriteProcessMemory(CurrentHandle(), address + GlobalOffset, value, value.Length, out _);
         }
 
         public static bool WriteString(ulong address, string value, Endianness endianness = Endianness.Little, Encoding encoding = null)
@@ -618,7 +636,7 @@ namespace Archipelago.Core.Util
             {
                 Marshal.StructureToPtr(str, ptr, true);
                 Marshal.Copy(ptr, buffer, 0, size);
-                PlatformImpl.WriteProcessMemory(GetProcessH(CurrentProcId), address + GlobalOffset, buffer, size, out _);
+                PlatformImpl.WriteProcessMemory(CurrentHandle(), address + GlobalOffset, buffer, size, out _);
             }
             finally
             {
@@ -631,31 +649,31 @@ namespace Archipelago.Core.Util
         public static bool FreezeAddress(ulong address, int length)
         {
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
-            return PlatformImpl.VirtualProtectEx(GetProcessH(CurrentProcId), (IntPtr)address, (IntPtr)length, PAGE_READONLY, out var oldProtect);
+            return PlatformImpl.VirtualProtectEx(CurrentHandle(), (IntPtr)address, (IntPtr)length, PAGE_READONLY, out var oldProtect);
         }
 
         public static bool UnfreezeAddress(ulong address, int length)
         {
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
-            return PlatformImpl.VirtualProtectEx(GetProcessH(CurrentProcId), (IntPtr)address, (IntPtr)length, PAGE_READWRITE, out var oldProtect);
+            return PlatformImpl.VirtualProtectEx(CurrentHandle(), (IntPtr)address, (IntPtr)length, PAGE_READWRITE, out var oldProtect);
         }
-        
+
         public static IntPtr Allocate(uint size, uint flProtect = PAGE_READWRITE)
         {
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
-            return PlatformImpl.VirtualAllocEx(GetProcessH(CurrentProcId), IntPtr.Zero, (IntPtr)size, MEM_COMMIT, flProtect);
+            return PlatformImpl.VirtualAllocEx(CurrentHandle(), IntPtr.Zero, (IntPtr)size, MEM_COMMIT, flProtect);
         }
 
         public static IntPtr AllocateAbove(uint size)
         {
-            IntPtr freeAddress = PlatformImpl.FindFreeRegionBelow4GB(GetProcessH(CurrentProcId), size);
-            return PlatformImpl.VirtualAllocEx(GetProcessH(CurrentProcId), freeAddress, (IntPtr)size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            IntPtr freeAddress = PlatformImpl.FindFreeRegionBelow4GB(CurrentHandle(), size);
+            return PlatformImpl.VirtualAllocEx(CurrentHandle(), freeAddress, (IntPtr)size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
         }
 
         public static bool FreeMemory(IntPtr address)
         {
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
-            return PlatformImpl.VirtualFreeEx(GetProcessH(CurrentProcId), address, IntPtr.Zero, MEM_RELEASE);
+            return PlatformImpl.VirtualFreeEx(CurrentHandle(), address, IntPtr.Zero, MEM_RELEASE);
         }
         #endregion
 
@@ -665,7 +683,7 @@ namespace Archipelago.Core.Util
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
             byte[] buffer = new byte[size];
 
-            PlatformImpl.ReadProcessMemory(GetProcessH(CurrentProcId), (ulong)start, buffer, size, out var bytesRead);
+            PlatformImpl.ReadProcessMemory(CurrentHandle(), (ulong)start, buffer, size, out var bytesRead);
 
             for (int i = 0; i < size - pattern.Length; i++)
             {
@@ -690,13 +708,13 @@ namespace Archipelago.Core.Util
         private static uint Execute(IntPtr address, uint timeoutSeconds = 0xFFFFFFFF)
         {
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
-            return PlatformImpl.Execute(GetProcessH(CurrentProcId), address, timeoutSeconds);
+            return PlatformImpl.Execute(CurrentHandle(), address, timeoutSeconds);
         }
 
         public static uint ExecuteCommand(byte[] bytes, uint timeoutSeconds = 0xFFFFFFFF)
         {
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
-            return PlatformImpl.ExecuteCommand(GetProcessH(CurrentProcId), bytes, timeoutSeconds);
+            return PlatformImpl.ExecuteCommand(CurrentHandle(), bytes, timeoutSeconds);
         }
         #endregion
 
@@ -704,7 +722,7 @@ namespace Archipelago.Core.Util
         public static MODULEINFO GetModuleInfo(string moduleName)
         {
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
-            return PlatformImpl.GetModuleInfo(GetProcessH(CurrentProcId), moduleName);
+            return PlatformImpl.GetModuleInfo(CurrentHandle(), moduleName);
         }
         #endregion
 
@@ -773,7 +791,7 @@ namespace Archipelago.Core.Util
                 while (true)
                 {
                     int value = ReadByte(address);
-                    if(lastVal == readyTriggerVal && value == triggerActionVal)
+                    if (lastVal == readyTriggerVal && value == triggerActionVal)
                     {
                         action();
                     }

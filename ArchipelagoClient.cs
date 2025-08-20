@@ -13,7 +13,9 @@ using Archipelago.MultiClient.Net.Packets;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Serilog;
+using System.Drawing.Text;
 using System.Text.Json;
+using System.Threading;
 
 namespace Archipelago.Core
 {
@@ -34,6 +36,8 @@ namespace Archipelago.Core
         public int itemsReceivedCurrentSession { get; set; }
         public bool isReadyToReceiveItems { get; set; }
         public ArchipelagoSession CurrentSession { get; set; }
+        private CancellationTokenSource _monitorToken { get; set; }
+        private List<ILocation> _monitoredLocations { get; set; } = new List<ILocation>();
         public GPSHandler GPSHandler
         {
             get
@@ -67,7 +71,10 @@ namespace Archipelago.Core
         private bool isOverlayEnabled = false;
         private GPSHandler _gpsHandler;
         private const int BATCH_SIZE = 25;
+        private const int THREAD_COUNT = 20;
         private IGameClient _gameClient;
+        private object _locationListLock = new object();
+
         private CancellationTokenSource _cancellationTokenSource { get; set; } = new CancellationTokenSource();
         public ArchipelagoClient(IGameClient gameClient)
         {
@@ -232,10 +239,7 @@ namespace Archipelago.Core
         }
         public void CancelMonitors()
         {
-            var previousToken = _cancellationTokenSource;
-            _cancellationTokenSource = new CancellationTokenSource();
-            previousToken.Cancel();
-            previousToken.Dispose();
+            _monitorToken.Cancel();
         }
         private async Task ReceiveItems(CancellationToken cancellationToken = default)
         {
@@ -290,8 +294,81 @@ namespace Archipelago.Core
                 _receiveItemSemaphore.Release();
             }
         }
+        private async Task ProcessLocationsAsync()
+        {
 
-        public async Task MonitorLocations(List<ILocation> locations, CancellationToken cancellationToken = default)
+            
+            while (true)
+            {
+                List<ILocation> snapshot;
+                lock (_locationListLock)
+                {
+                    snapshot = _monitoredLocations.Select(loc => loc.DeepClone()).ToList();
+                }
+                var startTime = DateTime.UtcNow;
+                if (_monitorToken.IsCancellationRequested) return;
+                if (EnableLocationsCondition?.Invoke() ?? true)
+                {
+                    foreach (var location in snapshot)
+                    {
+
+                        var isCompleted = location.Check();// Helpers.CheckLocation(location);
+                        if (isCompleted)
+                        {
+                            SendLocation(location, _monitorToken.Token);
+                            Log.Debug($"{location.Name} ({location.Id}) Completed");
+                            RemoveLocationAsync(location);
+                            //  Log.Logger.Information(JsonConvert.SerializeObject(location));
+                        }
+                    }                   
+                }
+                await Task.Delay(500);
+            }
+        }
+
+        public async Task RemoveLocationAsync(ILocation location)
+        {
+            lock (_locationListLock)
+            {
+                var confirmedLocation = _monitoredLocations.SingleOrDefault(x => x.Id == location.Id);
+                if (confirmedLocation != null)
+                {
+                    Log.Verbose($"Location {location.Id} - {location.Name} removed from tracking");
+                    _monitoredLocations?.Remove(confirmedLocation);
+                }
+                else
+                {
+                    Log.Warning($"Could not remove location {location.Id} - {location.Name} because it was not found in the list, or was found multiple times.");
+                }
+            }
+        }
+        public async Task AddLocationAsync(ILocation location)
+        {
+            lock (_locationListLock)
+            {
+                if(!_monitoredLocations.Any(x => x.Id == location.Id))
+                    _monitoredLocations?.Add(location);
+            }
+        }
+        public async Task MonitorLocations(List<ILocation> locations)
+        {
+
+            _monitoredLocations = locations;
+            StartMonitoring();
+
+        }
+        private async Task StartMonitoring()
+        {
+            var tasks = new Task[THREAD_COUNT];
+    
+            for (int i = 0; i < THREAD_COUNT; i++)
+            {
+                tasks[i] = Task.Run(() => ProcessLocationsAsync(), _monitorToken.Token);
+            }
+            await Task.WhenAll(tasks);
+        }
+        [Obsolete]
+        public async Task MonitorLocationsOld(List<ILocation> locations, CancellationToken cancellationToken = default)
         {
             cancellationToken = CombineTokens(cancellationToken);
             var locationBatches = locations
@@ -313,6 +390,7 @@ namespace Archipelago.Core
                 OverlayService.AddTextPopup(message);
             }
         }
+        [Obsolete]
         private async Task MonitorBatch(List<ILocation> batch, CancellationToken token)
         {
             List<ILocation> completed = [];
@@ -352,11 +430,11 @@ namespace Archipelago.Core
                 Log.Error("Must be connected and logged in to send locations.");
                 return;
             }
-			if(GameState?.CompletedLocations == null)
-			{
-				Log.Error("Could not send location, GameState is null.");
+            if (GameState?.CompletedLocations == null)
+            {
+                Log.Error("Could not send location, GameState is null.");
                 return;
-			}
+            }
             if (EnableLocationsCondition?.Invoke() ?? true)
             {
                 Log.Debug($"Marking location {location.Id} as complete");
@@ -484,7 +562,7 @@ namespace Archipelago.Core
                 else
                 {
                     Log.Warning("No existing GameState, Creating new GameState");
-                    GameState = new GameState(){LastCheckedIndex = 0};
+                    GameState = new GameState() { LastCheckedIndex = 0 };
                     await SaveGameStateAsync(cancellationToken);
                 }
 
@@ -493,7 +571,7 @@ namespace Archipelago.Core
             }
             catch
             {
-				Log.Warning("An unhandled exception occurred when loading GameState. Creating new GameState.");
+                Log.Warning("An unhandled exception occurred when loading GameState. Creating new GameState.");
                 GameState = new GameState();
             }
         }
@@ -582,10 +660,12 @@ namespace Archipelago.Core
                 Disconnect();
             }
             _gameClientPollTimer?.Dispose();
+            _receiveItemSemaphore?.Dispose();
             _gameStateTimer?.Dispose();
             OverlayService?.Hide();
             OverlayService?.Dispose();
-            _cancellationTokenSource.Dispose();
+            _monitorToken?.Dispose();
+            _cancellationTokenSource?.Dispose();
 
         }
 

@@ -14,6 +14,36 @@ namespace Archipelago.Core.Util
     public static class Helpers
     {
 
+        public static ILocation DeepClone(this ILocation location)
+        {
+            return location switch
+            {
+                Location loc => new Location
+                {
+                    Id = loc.Id,
+                    Name = loc.Name,
+                    Category = loc.Category,
+                    Address = loc.Address,
+                    AddressBit = loc.AddressBit,
+                    NibblePosition = loc.NibblePosition,
+                    CheckType = loc.CheckType,
+                    CheckValue = loc.CheckValue,
+                    CompareType = loc.CompareType,
+                    RangeStartValue = loc.RangeStartValue,
+                    RangeEndValue = loc.RangeEndValue
+                },
+                CompositeLocation comp => new CompositeLocation
+                {
+                    Id = comp.Id,
+                    Name = comp.Name,
+                    Category = comp.Category,
+                    CheckType = comp.CheckType,
+                    Conditions = comp.Conditions?.Select(c => c.DeepClone()).ToList() ?? new List<ILocation>()
+                },
+                _ => throw new NotSupportedException($"Unknown location type: {location.GetType()}")
+            };
+        }
+
         public static T Random<T>(this IEnumerable<T> list) where T : struct
         {
             return list.ToList()[new Random().Next(0, list.Count())];
