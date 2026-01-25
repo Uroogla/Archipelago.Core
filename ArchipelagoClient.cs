@@ -67,6 +67,7 @@ namespace Archipelago.Core
         public ItemState ItemState => _gameStateManager?.CurrentItemState;
         public LocationState LocationState => _gameStateManager?.CurrentLocationState;
         public Dictionary<string, object> CustomValues => _gameStateManager?.CustomValues ?? new Dictionary<string, object>();
+        public bool ShouldSaveStateOnItemReceived { get; set; }
 
         private IOverlayService? OverlayService { get; set; }
 
@@ -85,10 +86,12 @@ namespace Archipelago.Core
             _gameClientPollTimer = new Timer(PeriodicGameClientConnectionCheck, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
             NativeLibraryLoader.Initialize();
             this.isReadyToReceiveItems = false;
+            this.ShouldSaveStateOnItemReceived = false;
         }
         public async Task SaveGameStateAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken = CombineTokens(cancellationToken);
+            if (!IsConnected || !IsLoggedIn || CurrentSession == null || ItemState == null) return;
 
             if (_gameStateManager == null)
             {
@@ -289,7 +292,7 @@ namespace Archipelago.Core
         }
         private async Task ReceiveItems(CancellationToken cancellationToken = default)
         {
-            if (!isReadyToReceiveItems)
+            if (!isReadyToReceiveItems || ItemState == null || CurrentSession == null)
             {
                 return;
             }
@@ -297,11 +300,14 @@ namespace Archipelago.Core
             await _receiveItemSemaphore.WaitAsync(cancellationToken);
             try
             {
-                if (!isReadyToReceiveItems) /* in case it was set false while waiting */
+                if (!isReadyToReceiveItems || ItemState == null || CurrentSession == null) /* in case it was set false while waiting */
                 {
                     return; 
                 }
-                await _gameStateManager.LoadItemsAsync(cancellationToken);
+                if (this.ShouldSaveStateOnItemReceived)
+                {
+                    await _gameStateManager.LoadItemsAsync(cancellationToken);
+                }
 
                 bool receivedNewItems = false;
 
@@ -550,7 +556,7 @@ namespace Archipelago.Core
             List<ILocation> completed = [];
             while (!batch.All(x => completed.Any(y => y.Id == x.Id)))
             {
-                if (token.IsCancellationRequested) return;
+                if (token.IsCancellationRequested || ItemState == null || CurrentSession == null) return;
                 if (EnableLocationsCondition?.Invoke() ?? true)
                 {
                     foreach (var location in batch)
