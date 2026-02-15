@@ -20,6 +20,7 @@ namespace Archipelago.Core.Helpers
         private readonly string _gameName;
         private readonly string _seed;
         private readonly int _slot;
+        private readonly string _saveId;
 
         private readonly SemaphoreSlim _saveItemSemaphore = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim _saveCustomValuesSemaphore = new SemaphoreSlim(1, 1);
