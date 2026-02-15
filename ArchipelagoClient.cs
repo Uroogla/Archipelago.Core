@@ -39,6 +39,8 @@ namespace Archipelago.Core
         public Func<bool>? EnableLocationsCondition;
         public ItemsHandlingFlags? itemsFlags { get; set; }
         public int itemsReceivedCurrentSession { get; set; }
+        private Queue<ItemInfo> InProcessItems { get; set; }
+        private Queue<ItemInfo> ItemsReceived { get; set; }
         public bool isReadyToReceiveItems { get; set; }
         public ArchipelagoSession CurrentSession { get; set; }
         private CancellationTokenSource _monitorToken { get; set; } = new CancellationTokenSource();
@@ -58,10 +60,9 @@ namespace Archipelago.Core
                 }
             }
         }
-
+        public GPSStateManager GpsStateManager { get { return _gpsStateManager; } }
         private string GameName { get; set; } = "";
         private string Seed { get; set; } = "";
-		private string _saveId { get; set; }
         private Dictionary<string, object> _options = [];
         public Dictionary<string, object> Options { get { return _options; } }
         public ItemState ItemState => _gameStateManager?.CurrentItemState;
@@ -99,10 +100,13 @@ namespace Archipelago.Core
                 return;
             }
 
-            await _gameStateManager.SaveItemsAsync(cancellationToken);
-            await _gameStateManager.SaveLocationsAsync(cancellationToken);
+            await _gameStateManager.SaveItemIndexAsync(cancellationToken);
+            if (CustomValues.Count > 0)
+            {
+                await _gameStateManager.SaveCustomValuesAsync(cancellationToken);
+            }
         }
-        public async Task LoadGameStateAsync(CancellationToken cancellationToken = default)
+        public async Task LoadGameStateAsync(CancellationToken cancellationToken = default, bool loadItemIndex = true)
         {
             cancellationToken = CombineTokens(cancellationToken);
 
@@ -112,15 +116,35 @@ namespace Archipelago.Core
                 return;
             }
 
-            await _gameStateManager.LoadItemsAsync(cancellationToken);
-            await _gameStateManager.LoadLocationsAsync(cancellationToken);
-            if (_gameStateManager.CurrentItemState.ReceivedItems.Count == 0
-             && _gameStateManager.CurrentLocationState.CompletedLocations.Count == 0)
+            if (loadItemIndex)
             {
-                Log.Logger.Information("No locations or items received.");
-                /* attempt to migrate from "gamestate" (previous method of storing item and loc state) */
-                await _gameStateManager.MigrateGameStateAsync(cancellationToken);
+                await _gameStateManager.LoadItemIndexAsync(cancellationToken);
             }
+            await _gameStateManager.LoadCustomValuesAsync(cancellationToken);
+        }
+        public async Task SaveCustomValuesAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken = CombineTokens(cancellationToken);
+
+            if (_gameStateManager == null)
+            {
+                Log.Warning("GameStateManager not initialized");
+                return;
+            }
+
+            await _gameStateManager.SaveCustomValuesAsync(cancellationToken);
+        }
+        public async Task LoadCustomValuesAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken = CombineTokens(cancellationToken);
+
+            if (_gameStateManager == null)
+            {
+                Log.Warning("GameStateManager not initialized");
+                return;
+            }
+
+            await _gameStateManager.LoadCustomValuesAsync(cancellationToken);
         }
         private void PeriodicGameClientConnectionCheck(object? state)
         {
@@ -139,7 +163,7 @@ namespace Archipelago.Core
             OverlayService.AttachToWindow(Memory.GetCurrentProcess().MainWindowHandle);
             isOverlayEnabled = true;
         }
-        public async Task Connect(string host, string gameName, string saveId, CancellationToken cancellationToken = default)
+        public async Task Connect(string host, string gameName, CancellationToken cancellationToken = default)
         {
             cancellationToken = CombineTokens(cancellationToken);
             Disconnect();
@@ -154,8 +178,7 @@ namespace Archipelago.Core
                 CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;
                 CurrentSession.Items.ItemReceived += ItemReceivedHandler;
                 /* Does this do anything? We haven't added a listener on PacketReceived */
-                CurrentSession.Socket.SendPacket(new SetNotifyPacket() { Keys = new[] { "ItemState" } });
-                CurrentSession.Socket.SendPacket(new SetNotifyPacket() { Keys = new[] { "LocationState" } });
+                CurrentSession.Socket.SendPacket(new SetNotifyPacket() { Keys = new[] { "ItemIndex" } });
                 CurrentSession.Socket.SendPacket(new SetNotifyPacket() { Keys = new[] { "CustomValues" } });
                 CurrentSession.Socket.SendPacket(new SetNotifyPacket() { Keys = new[] { "GPS" } });
                 IsConnected = true;
@@ -198,7 +221,7 @@ namespace Archipelago.Core
             Log.Information($"Disconnected");
         }
 
-        public async Task Login(string playerName, string password = null, ItemsHandlingFlags? itemsHandlingFlags = null, CancellationToken cancellationToken = default)
+        public async Task Login(string playerName, string password = null, ItemsHandlingFlags? itemsHandlingFlags = null, CancellationToken cancellationToken = default, bool startReadyToReceiveItems = true)
         {
             cancellationToken = CombineTokens(cancellationToken);
             if (!IsConnected)
@@ -206,7 +229,7 @@ namespace Archipelago.Core
                 Log.Error("Must be connected to the server to log in.  Please ensure your host is correct.");
                 return;
             }
-            if(itemsHandlingFlags != null)
+            if (itemsHandlingFlags != null)
             {
                 itemsFlags = itemsHandlingFlags;
             }
@@ -236,16 +259,18 @@ namespace Archipelago.Core
             {
                 Log.Warning("No options found.");
             }
-            _gameStateManager = new GameStateManager(CurrentSession, GameName, Seed, currentSlot, _saveId);
+            _gameStateManager = new GameStateManager(CurrentSession, GameName, Seed, currentSlot);
             _gpsStateManager = new GPSStateManager(CurrentSession, GameName, Seed, currentSlot);
 
-            await LoadGameStateAsync(cancellationToken);
+            await LoadGameStateAsync(cancellationToken, startReadyToReceiveItems);
 
             itemsReceivedCurrentSession = 0;
+            ItemsReceived = [];
+            InProcessItems = [];
 
             IsLoggedIn = true;
             await Task.Run(() => Connected?.Invoke(this, new ConnectionChangedEventArgs(true)));
-            isReadyToReceiveItems = true;
+            isReadyToReceiveItems = startReadyToReceiveItems;
             await ReceiveItems(cancellationToken);
 
             return;
@@ -296,13 +321,17 @@ namespace Archipelago.Core
             {
                 return;
             }
+            if (_gameStateManager == null)
+            {
+                Log.Error("GameStateManager is null. Cannot receive items.");
+            }
             cancellationToken = CombineTokens(cancellationToken);
             await _receiveItemSemaphore.WaitAsync(cancellationToken);
             try
             {
                 if (!isReadyToReceiveItems || ItemState == null || CurrentSession == null) /* in case it was set false while waiting */
                 {
-                    return; 
+                    return;
                 }
                 if (this.ShouldSaveStateOnItemReceived)
                 {
@@ -312,11 +341,26 @@ namespace Archipelago.Core
                 bool receivedNewItems = false;
 
                 ItemInfo newItemInfo = CurrentSession.Items.PeekItem();
+                // move all items into the InProcessItems queue
                 while (newItemInfo != null)
                 {
+                    InProcessItems.Enqueue(newItemInfo);
+                    CurrentSession.Items.DequeueItem();
+                    newItemInfo = CurrentSession.Items.PeekItem();
+                }
+                // for each item in the InProcessItems queue, try to process it.
+                bool abletopeek = InProcessItems.TryPeek(out newItemInfo);
+                Log.Logger.Debug($"able to peek? {abletopeek}");
+                Log.Logger.Debug($"ircs={itemsReceivedCurrentSession}, sii={_gameStateManager.SavedItemIndex}");
+                while (abletopeek && newItemInfo != null)
+                {
+                    if (!isReadyToReceiveItems) // In case switch is flipped while mid-receiving
+                    {
+                        return;
+                    }
                     itemsReceivedCurrentSession++;
                     bool receiveSuccess = true;
-                    if (itemsReceivedCurrentSession > ItemState.LastCheckedIndex)
+                    if (itemsReceivedCurrentSession > _gameStateManager.SavedItemIndex)
                     {
                         var item = new Item
                         {
@@ -337,8 +381,7 @@ namespace Archipelago.Core
 
                         if (receiveSuccess)
                         {
-                            ItemState.ReceivedItems.Enqueue(item);
-                            ItemState.LastCheckedIndex = itemsReceivedCurrentSession;
+                            _gameStateManager.SavedItemIndex++;
                             receivedNewItems = true;
                         }
                         else
@@ -355,13 +398,14 @@ namespace Archipelago.Core
                         Log.Verbose($"Fast forwarding past previously received item {newItemInfo.ItemName}");
                     }
 
-                    CurrentSession.Items.DequeueItem();
-                    newItemInfo = CurrentSession.Items.PeekItem();
+                    ItemsReceived.Enqueue(newItemInfo); // add it to the persistent list
+                    InProcessItems.Dequeue(); // remove it from in process list
+                    abletopeek = InProcessItems.TryPeek(out newItemInfo); // get next item
                 }
 
                 if (receivedNewItems)
                 {
-                    await _gameStateManager.SaveItemsAsync(cancellationToken);
+                    await _gameStateManager.SaveItemIndexAsync(cancellationToken);
                 }
             }
             finally
@@ -370,7 +414,7 @@ namespace Archipelago.Core
             }
         }
 
-        public async void ReceiveReady()
+        public async Task ReceiveReady()
         {
             isReadyToReceiveItems = true;
             await ReceiveItems();
@@ -590,26 +634,19 @@ namespace Archipelago.Core
                 Log.Error("Must be connected and logged in to send locations.");
                 return;
             }
-            if (LocationState?.CompletedLocations == null)
-            {
-                Log.Error("Could not send location, LocationState is null.");
-                return;
-            }
             if (!(EnableLocationsCondition?.Invoke() ?? true))
             {
                 Log.Debug("Location precondition not met, location not sent");
                 return;
             }
             Log.Debug($"Marking location {location.Id} as complete");
-            if (LocationState.CompletedLocations.Any((x) => x.Id == location.Id))
+            if (CurrentSession.Locations.AllLocationsChecked.Contains(location.Id))
             {
                 Log.Debug($"Skipping location {location.Name} - already completed.");
                 return;
             }
-
             await CurrentSession.Locations.CompleteLocationChecksAsync([(long)location.Id]);
-            LocationState.CompletedLocations.Enqueue(location);
-            await _gameStateManager.SaveLocationsAsync(cancellationToken);
+            
             LocationCompleted?.Invoke(this, new LocationCompletedEventArgs(location));
         }
 
@@ -647,15 +684,14 @@ namespace Archipelago.Core
         }
         public async Task ForceReloadAllItems(CancellationToken cancellationToken = default)
         {
-            if (_gameStateManager?.CurrentItemState == null)
+            if (_gameStateManager == null)
             {
-                Log.Warning("Cannot reload items - ItemState is null");
+                Log.Warning("Cannot reload items - gameStateManager is null");
                 return;
             }
 
-            _gameStateManager.CurrentItemState.ReceivedItems = new ConcurrentQueue<Item>();
-            _gameStateManager.CurrentItemState.LastCheckedIndex = 0;
-            await _gameStateManager.ForceSaveItemsAsync(cancellationToken);
+            _gameStateManager.SavedItemIndex = 0;
+            await _gameStateManager.ForceSaveItemIndexAsync(cancellationToken);
         }
         public async Task SendBounceMessage(BouncePacket bouncePacket)
         {
@@ -708,6 +744,76 @@ namespace Archipelago.Core
             }
 
         }
+        // Request a new saveid. 
+        public async Task<byte> RequestNewSaveId()
+        {
+            byte newSaveId;
+            await _gameStateManager.LoadSaveIdsAsync();
+            if (_gameStateManager.SaveIds.Count > 0)
+            {
+                byte highestid = _gameStateManager.SaveIds.Max(x => ((byte)x));
+                if (highestid >= 255)
+                {
+                    Log.Logger.Error("Cannot have more than 255 saves");
+                    return 0; // return 0, an invalid saveid
+                }
+                newSaveId = (byte)(highestid + 1);
+            }
+            else
+            {
+                newSaveId = 1; // start at 1
+            }
+            _gameStateManager.SaveIds.Add(newSaveId);
+            Log.Logger.Debug($"Added saveid {newSaveId}");
+            await _gameStateManager.SaveSaveIdsAsync();
+            return newSaveId;
+        }
 
+        // Update our "saveid" value stored in the gamestate.
+        // Disables item receives, and resets the items in the receivable items list.
+        // Returns true if this was allowed, and false if it failed. 
+        public async Task<bool> UpdateSaveId(byte newsaveid)
+        {
+            await _gameStateManager.LoadSaveIdsAsync();
+            if (!_gameStateManager.SaveIds.Contains(newsaveid))
+            {
+                Log.Logger.Error("Error: save id not in list");
+                return false;
+            }
+
+            string newsaveidString = newsaveid.ToString("X");
+            if (_gameStateManager.saveId == newsaveidString) // no update needed
+            {
+                Log.Logger.Debug("saveid is unchanged");
+                return true;
+            }
+            else
+            {
+                isReadyToReceiveItems = false; // in case we were recieving items, stop.
+                await _receiveItemSemaphore.WaitAsync(_cancellationTokenSource.Token); // wait for receives to finish
+                _receiveItemSemaphore.Release(); // release the semaphore immediately. The isReadyToReceive flag being false will prevent receives until we are done.
+
+                _gameStateManager.saveId = newsaveidString;
+                // First, save in process queue to a backup
+                Queue<ItemInfo> backup = InProcessItems;
+                // Then, reset the in process queue to those already received.
+                InProcessItems = ItemsReceived;
+
+                // To the already received items, append the backed up "in process" ones. This maintains the queue order.
+                while (backup.TryDequeue(out var item))
+                {
+                    InProcessItems.Enqueue(item);
+                }
+                // Empty the ItemsReceived list, so it can start getting items again.
+                ItemsReceived = new Queue<ItemInfo>();
+                Log.Logger.Debug($"IPI queue has {InProcessItems.Count} items");
+                Log.Logger.Debug($"IR queue has {ItemsReceived.Count} items");
+
+                // start from receiving "item 0" again
+                itemsReceivedCurrentSession = 0;
+                Log.Logger.Debug($"Updated saveid to {newsaveid}");
+            }
+            return true;
+        }
     }
 }

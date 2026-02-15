@@ -12,6 +12,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using Archipelago.Core.Util.PlatformMemory;
 using static Archipelago.Core.Util.Enums;
 
 namespace Archipelago.Core.Util
@@ -26,9 +27,15 @@ namespace Archipelago.Core.Util
 
         static Memory()
         {
-            PlatformImpl = RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
-                ? new LinuxMemory()
-                : new WindowsMemory();
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                PlatformImpl = new LinuxMemory();
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                PlatformImpl = new MacOSMemory();
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                PlatformImpl = new WindowsMemory();
+            else 
+                throw new PlatformNotSupportedException();
         }
         #endregion
 
@@ -75,16 +82,67 @@ namespace Archipelago.Core.Util
 
         public static int GetProcessID(string procName)
         {
-	    int procPID = PlatformImpl.GetPID(procName);
-	    if (procPID > 0)
-	    {
-		return procPID;
-	    }
-	    else
-	    {
-		PlatformImpl.CloseHandle(CurrentHandle());
-		return 0;
-	    }
+            int procPID = PlatformImpl.GetPID(procName);
+            if (procPID > 0)
+            {
+                return procPID;
+            }
+            else
+            {
+                return GetProcFromIdFromPartial(procName);
+            }
+        }
+        public static List<int> GetProcessIDs(string procName)
+        {
+            List<int> procPIDlist = PlatformImpl.GetPIDs(procName);
+            if (procPIDlist.Count > 0)
+            {
+                return procPIDlist;
+            }
+            else
+            {
+                return GetProcFromIdsFromPartial(procName);
+            }
+        }
+        public static int GetProcFromIdFromPartial(string procPartialName)
+        {
+            Console.WriteLine($"Find Process ID {procPartialName}");
+            Process[] allProcesses = Process.GetProcesses();
+
+            List<Process> foundProcesses = allProcesses
+                .Where(p => p.ProcessName.Contains(procPartialName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (foundProcesses.Count >= 1)
+            {
+                return foundProcesses[0].Id;
+            }
+            else
+            {
+                PlatformImpl.CloseHandle(CurrentHandle());
+                return 0;
+            }
+
+        }
+        public static List<int> GetProcFromIdsFromPartial(string procPartialName)
+        {
+            Console.WriteLine($"Find Process ID {procPartialName}");
+            Process[] allProcesses = Process.GetProcesses();
+
+            List<Process> foundProcesses = allProcesses
+                .Where(p => p.ProcessName.Contains(procPartialName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (foundProcesses.Count >= 1)
+            {
+                return foundProcesses.Select(x=> x.Id).ToList();
+            }
+            else
+            {
+                PlatformImpl.CloseHandle(CurrentHandle());
+                return [];
+            }
+
         }
         public static ulong GetPCSX2Offset()
         {
@@ -729,6 +787,14 @@ namespace Archipelago.Core.Util
             if (CurrentProcId == 0) throw new ArgumentException("CurrentProcId has not been set");
             return PlatformImpl.GetModuleInfo(CurrentHandle(), moduleName);
         }
+        public static IntPtr GetModuleBaseAddress(int pid, string moduleName)
+        {
+            return PlatformImpl.GetModuleBaseAddress(pid, moduleName);
+        }
+        public static IntPtr GetExportAddress(int pid, IntPtr moduleBase, string exportName)
+        {
+            return PlatformImpl.GetExportAddress(pid, moduleBase, exportName);
+        }
         #endregion
 
         #region Common Process IDs
@@ -749,6 +815,7 @@ namespace Archipelago.Core.Util
         public static int XENIA_PROCESSID => GetProcessID("Xenia");
 
         public static int GetProcIdFromExe(string exe) => GetProcessID(exe);
+        public static List<int> GetProcIdsFromExe(string exe) => GetProcessIDs(exe);
         #endregion
 
         #region Utilities

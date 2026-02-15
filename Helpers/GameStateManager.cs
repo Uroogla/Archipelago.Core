@@ -22,42 +22,160 @@ namespace Archipelago.Core.Helpers
         private readonly int _slot;
         private readonly string _saveId;
 
-        private DateTime _lastItemSaveTime = DateTime.MinValue;
-        private DateTime _lastLocationSaveTime = DateTime.MinValue;
         private readonly SemaphoreSlim _saveItemSemaphore = new SemaphoreSlim(1, 1);
-        private readonly SemaphoreSlim _saveLocationSemaphore = new SemaphoreSlim(1, 1);
-        private const int SAVE_THROTTLE_SECONDS = 10;
+        private readonly SemaphoreSlim _saveCustomValuesSemaphore = new SemaphoreSlim(1, 1);
 
-        public ItemState CurrentItemState { get; private set; }
-        public LocationState CurrentLocationState { get; private set; }
-        public Dictionary<string, object> CustomValues { get; private set; }
+        public int SavedItemIndex { get; set; }
+        public Dictionary<string, string> CustomValues { get; private set; }
+        public List<byte> SaveIds { get; private set; } = [];
+        public string saveId;
 
-        public GameStateManager(ArchipelagoSession session, string gameName, string seed, int slot, string saveId)
+        public GameStateManager(ArchipelagoSession session, string gameName, string seed, int slot)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _gameName = gameName ?? throw new ArgumentNullException(nameof(gameName));
             _seed = seed ?? throw new ArgumentNullException(nameof(seed));
             _slot = slot;
-			_saveId = saveId;
-			
-            CustomValues = new Dictionary<string, object>();
+            saveId = "";
+
+            CustomValues = new Dictionary<string, string>();
         }
 
-        public async Task SaveItemsAsync(CancellationToken cancellationToken = default)
+        public async Task SaveItemIndexAsync(CancellationToken cancellationToken = default)
         {
-            if (CurrentItemState == null)
+            if (!await _saveItemSemaphore.WaitAsync(0, cancellationToken))
             {
-                Log.Warning("Cannot save - ItemState is null");
+                Log.Verbose("Save already in progress, skipping");
+                return;
+            }
+            try
+            {
+                Log.Debug("Saving Item index");
+
+                string suffix = "";
+                if (saveId != "")
+                {
+                    suffix = $"_{saveId}";
+                }
+
+                await _session.Socket.SendPacketAsync(CreateSetPacket($"ItemIndex{suffix}", SavedItemIndex));
+
+                Log.Debug("Item index save completed");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Failed to save Item index: {ex.Message}");
+                throw;
+            }
+            finally
+            {
+                _saveItemSemaphore.Release();
+            }
+        }
+        public async Task ForceSaveItemIndexAsync(CancellationToken cancellationToken = default)
+        {
+            await SaveItemIndexAsync(cancellationToken);
+        }
+
+        public async Task LoadItemIndexAsync(CancellationToken cancellationToken = default)
+        {
+            Log.Verbose("Loading item index");
+
+            try
+            {
+                string suffix = "";
+                if (saveId != "")
+                {
+                    suffix = $"_{saveId}";
+                }
+
+                var (success, data) = await DeserializeFromStorageAsync<int>($"ItemIndex{suffix}");
+                if (success && data != null)
+                {
+                    SavedItemIndex = data;
+
+                    Log.Verbose($"Loaded ItemIndex with {SavedItemIndex} items");
+                }
+                else
+                {
+                    Log.Warning("No existing ItemIndex found - creating new");
+                    SavedItemIndex = 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error loading ItemIndex: {ex.Message}");
+                SavedItemIndex = 0;
+            }
+        }
+
+        public async Task UpdateAndSaveItemIndexAsync(Action<int> updateAction, CancellationToken cancellationToken = default)
+        {
+            updateAction(SavedItemIndex);
+            await SaveItemIndexAsync(cancellationToken);
+        }
+        public async Task SaveCustomValuesAsync(CancellationToken cancellationToken = default)
+        {
+            if (!await _saveCustomValuesSemaphore.WaitAsync(0, cancellationToken))
+            {
+                Log.Verbose("Save already in progress, skipping");
                 return;
             }
 
-            var timeSinceLastItemSave = DateTime.UtcNow - _lastItemSaveTime;
-            if (timeSinceLastItemSave < TimeSpan.FromSeconds(SAVE_THROTTLE_SECONDS))
+            try
             {
-                Log.Verbose($"Save throttled - last save was {timeSinceLastItemSave.TotalSeconds:F1}s ago (minimum {SAVE_THROTTLE_SECONDS}s)");
-                return;
-            }
+                Log.Debug("Saving Custom values");
 
+                await _session.Socket.SendPacketAsync(CreateSetPacket("CustomValues", CustomValues));
+
+                Log.Debug("Custom values save completed");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Failed to save Custom values: {ex.Message}");
+                throw;
+            }
+            finally
+            {
+                _saveCustomValuesSemaphore.Release();
+            }
+        }
+        public async Task ForceSaveCustomValuesAsync(CancellationToken cancellationToken = default)
+        {
+            await SaveCustomValuesAsync(cancellationToken);
+        }
+
+        public async Task LoadCustomValuesAsync(CancellationToken cancellationToken = default)
+        {
+            Log.Verbose("Loading Custom Values");
+
+            try
+            {
+                var (success, data) = await DeserializeFromStorageAsync<Dictionary<string, string>>("CustomValues");
+                if (success && data != null)
+                {
+                    CustomValues = data;
+                    Log.Verbose($"Loaded Custom Values with {CustomValues.Count} elements");
+                }
+                else
+                {
+                    CustomValues = new Dictionary<string, string>();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error loading Custom Values: {ex.Message}");
+                CustomValues = new Dictionary<string, string>();
+            }
+        }
+
+        public async Task UpdateAndSaveCustomValuesAsync(Action<Dictionary<string, string>> updateAction, CancellationToken cancellationToken = default)
+        {
+            updateAction(CustomValues);
+            await SaveCustomValuesAsync(cancellationToken);
+        }
+        public async Task SaveSaveIdsAsync(CancellationToken cancellationToken = default)
+        {
             if (!await _saveItemSemaphore.WaitAsync(0, cancellationToken))
             {
                 Log.Verbose("Save already in progress, skipping");
@@ -66,16 +184,15 @@ namespace Archipelago.Core.Helpers
 
             try
             {
-                Log.Debug("Saving Itemstate");
+                Log.Debug("Saving Save Ids");
 
-                await _session.Socket.SendPacketAsync(CreateSetPacket("ItemState", CurrentItemState));
+                await _session.Socket.SendPacketAsync(CreateSetPacket("SaveIds", SaveIds));
 
-                _lastItemSaveTime = DateTime.UtcNow;
-                Log.Debug("Save completed");
+                Log.Debug("Save Ids save completed");
             }
             catch (Exception ex)
             {
-                Log.Error($"Failed to save Item state: {ex.Message}");
+                Log.Error($"Failed to save Save Ids: {ex.Message}");
                 throw;
             }
             finally
@@ -84,177 +201,31 @@ namespace Archipelago.Core.Helpers
             }
         }
 
-        public async Task ForceSaveItemsAsync(CancellationToken cancellationToken = default)
+        public async Task LoadSaveIdsAsync(CancellationToken cancellationToken = default)
         {
-            _lastItemSaveTime = DateTime.MinValue;
-            await SaveItemsAsync(cancellationToken);
-        }
-
-        public async Task LoadItemsAsync(CancellationToken cancellationToken = default)
-        {
-            Log.Verbose("Loading item state");
+            Log.Verbose("Loading Save Ids");
 
             try
             {
-                var (success, data) = await DeserializeFromStorageAsync<ItemState>("ItemState");
+                var (success, data) = await DeserializeFromStorageAsync<List<byte>>("SaveIds");
                 if (success && data != null)
                 {
-                    CurrentItemState = data;
-                    Log.Verbose($"Loaded ItemState with {CurrentItemState.ReceivedItems.Count} items, LastCheckedIndex: {CurrentItemState.LastCheckedIndex}");
+                    SaveIds = data;
+
+                    Log.Verbose($"Loaded SaveIds with {SaveIds} items");
                 }
                 else
                 {
-                    Log.Warning("No existing ItemState found - creating new");
-                    CurrentItemState = new ItemState() { LastCheckedIndex = 0 };
+                    Log.Warning("No existing SaveIds found - creating new");
+                    SaveIds = [];
                 }
             }
             catch (Exception ex)
             {
-                Log.Error($"Error loading ItemState: {ex.Message}");
-                CurrentItemState = new ItemState() { LastCheckedIndex = 0 };
+                Log.Error($"Error loading SaveIds: {ex.Message}");
+                SaveIds = [];
             }
         }
-
-        public async Task UpdateAndSaveItemsAsync(Action<ItemState> updateAction, CancellationToken cancellationToken = default)
-        {
-            if (CurrentItemState == null)
-            {
-                Log.Warning("Cannot update - ItemState  is null");
-                return;
-            }
-
-            updateAction(CurrentItemState);
-            await SaveItemsAsync(cancellationToken);
-        }
-
-        public void ResetItemThrottle()
-        {
-            _lastItemSaveTime = DateTime.MinValue;
-            Log.Debug("Save throttle reset");
-        }
-
-        public async Task SaveLocationsAsync(CancellationToken cancellationToken = default)
-        {
-            if (CurrentLocationState == null)
-            {
-                Log.Warning("Cannot save - LocationState is null");
-                return;
-            }
-
-            var timeSinceLastLocationSave = DateTime.UtcNow - _lastLocationSaveTime;
-            if (timeSinceLastLocationSave < TimeSpan.FromSeconds(SAVE_THROTTLE_SECONDS))
-            {
-                Log.Verbose($"Save throttled - last save was {timeSinceLastLocationSave.TotalSeconds:F1}s ago (minimum {SAVE_THROTTLE_SECONDS}s)");
-                return;
-            }
-
-            if (!await _saveLocationSemaphore.WaitAsync(0, cancellationToken))
-            {
-                Log.Verbose("Save already in progress, skipping");
-                return;
-            }
-
-            try
-            {
-                Log.Debug("Saving Location state");
-
-                await _session.Socket.SendPacketAsync(CreateSetPacket("LocationState", CurrentLocationState));
-
-                _lastLocationSaveTime = DateTime.UtcNow;
-                Log.Debug("Save completed");
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Failed to save Location state: {ex.Message}");
-                throw;
-            }
-            finally
-            {
-                _saveLocationSemaphore.Release();
-            }
-        }
-
-        public async Task ForceSaveLocationsAsync(CancellationToken cancellationToken = default)
-        {
-            _lastLocationSaveTime = DateTime.MinValue;
-            await SaveLocationsAsync(cancellationToken);
-        }
-
-        public async Task LoadLocationsAsync(CancellationToken cancellationToken = default)
-        {
-            Log.Verbose("Loading Location state");
-
-            try
-            {
-                var (success, data) = await DeserializeFromStorageAsync<LocationState>("LocationState");
-                if (success && data != null)
-                {
-                    CurrentLocationState = data;
-                    Log.Verbose($"Loaded LocationState with {CurrentLocationState.CompletedLocations.Count} Locations");
-                }
-                else
-                {
-                    Log.Warning("No existing LocationState found - creating new");
-                    CurrentLocationState = new LocationState() { };
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Error loading LocationState: {ex.Message}");
-            }
-        }
-
-        public async Task UpdateAndSaveLocationsAsync(Action<LocationState> updateAction, CancellationToken cancellationToken = default)
-        {
-            if (CurrentLocationState == null)
-            {
-                Log.Warning("Cannot update - LocationState  is null");
-                return;
-            }
-
-            updateAction(CurrentLocationState);
-            await SaveLocationsAsync(cancellationToken);
-        }
-
-        public void ResetLocationThrottle()
-        {
-            _lastLocationSaveTime = DateTime.MinValue;
-            Log.Debug("Save throttle reset");
-        }
-
-        public async Task MigrateGameStateAsync(CancellationToken cancellationToken = default)
-        {
-            Log.Verbose("Loading Game state");
-            GameState result = null;
-            try
-            {
-                var (success, data) = await DeserializeFromStorageAsync<GameState>("GameState");
-                if (success && data != null)
-                {
-                    result = data;
-                    Log.Information($"Migrating GameState with {result.CompletedLocations.Count} Locations and {result.ReceivedItems.Count} items received.");
-                    CurrentItemState = new ItemState();
-                    CurrentItemState.ReceivedItems = result.ReceivedItems;
-                    CurrentItemState.LastCheckedIndex = result.LastCheckedIndex;
-
-                    CurrentLocationState = new LocationState();
-                    CurrentLocationState.CompletedLocations = result.CompletedLocations;
-
-                    await SaveItemsAsync();
-                    await SaveLocationsAsync();
-                    Log.Information($"Migration from GameState to ItemState and LocationState complete.");
-                }
-                else
-                {
-                    Log.Debug("Migration attempt failed - No existing GameState found.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Error loading GameState: {ex.Message}");
-            }
-        }
-
         private SetPacket CreateSetPacket<T>(string key, T value)
         {
             return new SetPacket()
@@ -335,7 +306,7 @@ namespace Archipelago.Core.Helpers
 
         private string BuildStorageKey(string key)
         {
-            return $"{_gameName}_{_slot}_{_seed}_{key}_{_saveId}";
+            return $"{_gameName}_{_slot}_{_seed}_{key}";
         }
     }
 }
