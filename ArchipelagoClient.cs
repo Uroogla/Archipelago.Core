@@ -400,7 +400,7 @@ namespace Archipelago.Core
             }
             else
             {
-                Log.Warning($"Could not remove location {location.Id} - {location.Name} because it was not found in the list, or was found multiple times.");
+                Log.Verbose($"Could not remove location {location.Id} - {location.Name} because it was not found in the list, or was found multiple times.");
             }
 
         }
@@ -607,7 +607,7 @@ namespace Archipelago.Core
                 return;
             }
 
-            await CurrentSession.Locations.CompleteLocationChecksAsync([(long)location.Id]);
+            await CurrentSession.Locations.CompleteLocationChecksAsync([(long)location.Id]).ConfigureAwait(false);
             LocationState.CompletedLocations.Enqueue(location);
             await _gameStateManager.SaveLocationsAsync(cancellationToken);
             LocationCompleted?.Invoke(this, new LocationCompletedEventArgs(location));
