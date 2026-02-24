@@ -13,7 +13,7 @@ namespace Archipelago.Core.GameClients
     {
         public DuckstationClient()
         {
-            ProcessName = "duckstation-qt-x64-ReleaseLTCG";
+            ProcessName = "duckstation";
             ProcId = Memory.GetProcIdFromExe(ProcessName);
         }
         public bool IsConnected { get; set; }
