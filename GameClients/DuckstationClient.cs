@@ -22,7 +22,21 @@ namespace Archipelago.Core.GameClients
 
         public bool Connect()
         {
-            Log.Verbose($"Connecting to {ProcessName}");
+            ProcessName = "duckstation-qt-x64-ReleaseLTCG";
+            if (ProcId == 0)
+            {
+                Log.Verbose($"Connecting to {ProcessName}");
+            }
+            try
+            {
+                ProcId = Memory.GetProcIdFromExe(ProcessName);
+            }
+            catch
+            {
+                Log.Error($"{ProcessName} not found.");
+                return false;
+            }
+            
             if (ProcId == 0)
             {
                 Log.Error($"{ProcessName} not found.");

@@ -25,7 +25,7 @@ namespace Archipelago.Core
 {
     public class ArchipelagoClient : IDisposable
     {
-        private readonly Timer _gameClientPollTimer;
+        private System.Threading.Timer _gameClientPollTimer;
         private GameStateManager? _gameStateManager;
         private GPSStateManager? _gpsStateManager;
         public bool IsConnected { get; set; }
@@ -83,7 +83,7 @@ namespace Archipelago.Core
             Memory.CurrentProcId = gameClient.ProcId;
             AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
             _gameClient = gameClient;
-            _gameClientPollTimer = new Timer(PeriodicGameClientConnectionCheck, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+            _gameClientPollTimer = new System.Threading.Timer(PeriodicGameClientConnectionCheck, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
             NativeLibraryLoader.Initialize();
             this.isReadyToReceiveItems = false;
             this.ShouldSaveStateOnItemReceived = false;
@@ -117,7 +117,7 @@ namespace Archipelago.Core
             if (_gameStateManager.CurrentItemState.ReceivedItems.Count == 0
              && _gameStateManager.CurrentLocationState.CompletedLocations.Count == 0)
             {
-                Log.Logger.Information("No locations or items received.");
+                Log.Logger.Verbose("No locations or items received.");
                 /* attempt to migrate from "gamestate" (previous method of storing item and loc state) */
                 await _gameStateManager.MigrateGameStateAsync(cancellationToken);
             }
@@ -128,6 +128,7 @@ namespace Archipelago.Core
             if (!isConnected)
             {
                 Log.Warning("Connection to game lost, disconnecting from Archipelago");
+                _gameClientPollTimer?.Change(Timeout.Infinite, Timeout.Infinite);
                 GameDisconnected?.Invoke(this, EventArgs.Empty);
                 Disconnect();
             }
@@ -150,6 +151,7 @@ namespace Archipelago.Core
                 Seed = roomInfo.SeedName;
                 GameName = gameName;
 
+                CurrentSession.Socket.ErrorReceived += Socket_SocketError;
                 CurrentSession.Socket.SocketClosed += Socket_SocketClosed;
                 CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;
                 CurrentSession.Items.ItemReceived += ItemReceivedHandler;
@@ -171,6 +173,13 @@ namespace Archipelago.Core
             await ReceiveItems(_cancellationTokenSource.Token);
         }
 
+        private void Socket_SocketError(Exception e, string reason)
+        {
+            Log.Error($"Connection Error: {reason}");
+            Log.Debug($"{e}");
+            Disconnect();
+        }
+
         private void Socket_SocketClosed(string reason)
         {
             Log.Warning($"Connection Closed: {reason}");
@@ -179,6 +188,7 @@ namespace Archipelago.Core
 
         public void Disconnect()
         {
+            bool wasConnected = false;
             if (CurrentSession != null)
             {
                 Log.Information($"Disconnecting...");
@@ -191,11 +201,15 @@ namespace Archipelago.Core
                 _gpsStateManager = null;
                 _gameStateManager = null;
                 CurrentSession = null;
+                wasConnected = true;
             }
             IsConnected = false;
             IsLoggedIn = false;
             Disconnected?.Invoke(this, new ConnectionChangedEventArgs(false));
-            Log.Information($"Disconnected");
+            if (wasConnected)
+            {
+                Log.Information($"Disconnected");
+            }
         }
 
         public async Task Login(string playerName, string password = null, ItemsHandlingFlags? itemsHandlingFlags = null, CancellationToken cancellationToken = default)
@@ -214,7 +228,7 @@ namespace Archipelago.Core
             Log.Verbose($"Login Result: {(loginResult.Successful ? "Success" : "Failed")}");
             if (loginResult.Successful)
             {
-                Log.Information($"Connected as Player: {playerName} playing {GameName}");
+                Log.Verbose($"Connected as Player: {playerName} playing {GameName}");
             }
             else
             {
@@ -223,7 +237,7 @@ namespace Archipelago.Core
             }
             var currentSlot = CurrentSession.ConnectionInfo.Slot;
             var slotData = await CurrentSession.DataStorage.GetSlotDataAsync(currentSlot);
-            Log.Information("Loading Options.");
+            Log.Verbose("Loading Options.");
             if (slotData.TryGetValue("options", out object? optionData))
             {
                 if (optionData != null)
@@ -690,6 +704,7 @@ namespace Archipelago.Core
             {
                 Disconnect();
             }
+            _gameClientPollTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _gameClientPollTimer?.Dispose();
             _receiveItemSemaphore?.Dispose();
             _gpsStateManager?.Dispose();

@@ -104,7 +104,7 @@ namespace Archipelago.Core.Helpers
                 }
                 else
                 {
-                    Log.Warning("No existing ItemState found - creating new");
+                    Log.Verbose("No existing ItemState found - creating new");
                     CurrentItemState = new ItemState() { LastCheckedIndex = 0 };
                 }
             }
@@ -194,7 +194,7 @@ namespace Archipelago.Core.Helpers
                 }
                 else
                 {
-                    Log.Warning("No existing LocationState found - creating new");
+                    Log.Verbose("No existing LocationState found - creating new");
                     CurrentLocationState = new LocationState() { };
                 }
             }
