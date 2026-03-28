@@ -4,6 +4,7 @@ using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -18,6 +19,7 @@ namespace Archipelago.Core.GameClients
         }
         public bool IsConnected { get; set; }
         public int ProcId { get; set; }
+        private int OldProcId { get; set; }
         public string ProcessName { get; set; }
 
         public bool Connect()
@@ -42,6 +44,12 @@ namespace Archipelago.Core.GameClients
                 Log.Error($"{ProcessName} not found.");
                 return false;
             }
+            if (OldProcId != 0 && OldProcId != ProcId)
+            {
+                Log.Error($"Either a second copy of the program was opened\r\nor the process ID has changed.");
+                return false;
+            }
+            OldProcId = ProcId;
             return true;
         }
     }

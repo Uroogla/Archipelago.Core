@@ -192,10 +192,17 @@ namespace Archipelago.Core
             if (CurrentSession != null)
             {
                 Log.Information($"Disconnecting...");
-                CurrentSession.Socket.DisconnectAsync();
-                CurrentSession.Socket.SocketClosed -= Socket_SocketClosed;
-                CurrentSession.MessageLog.OnMessageReceived -= HandleMessageReceived;
-                CurrentSession.Items.ItemReceived -= ItemReceivedHandler;
+                try
+                {
+                    CurrentSession.Socket.DisconnectAsync();
+                    CurrentSession.Socket.SocketClosed -= Socket_SocketClosed;
+                    CurrentSession.MessageLog.OnMessageReceived -= HandleMessageReceived;
+                    CurrentSession.Items.ItemReceived -= ItemReceivedHandler;
+                }
+                catch (Exception ex)
+                {
+                    Log.Logger.Error($"Error trying to disconnect current session.\r\n{ex.ToString}");
+                }
                 CancelMonitors();
                 _gpsStateManager?.Dispose();
                 _gpsStateManager = null;
