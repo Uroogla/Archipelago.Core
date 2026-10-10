@@ -39,7 +39,7 @@ namespace Archipelago.Core.Util
             byte[] buffer = new byte[1];
             bool success = ReadProcessMemory(PlatformMemory.PlatformMemory.CurrentHandle(), address, buffer, buffer.Length, out _);
             if (!success)
-                Log.Logger.Warning("ReadByte failed at address 0x{Address:X}", address);
+                Log.Logger.Debug("ReadByte failed at address 0x{Address:X}", address);
             return buffer[0];
         }
 
@@ -49,7 +49,7 @@ namespace Archipelago.Core.Util
             byte[] buffer = new byte[length];
             bool success = ReadProcessMemory(PlatformMemory.PlatformMemory.CurrentHandle(), address, buffer, buffer.Length, out _);
             if (!success)
-                Log.Logger.Warning("ReadByteArray failed at address 0x{Address:X} (length {Length})", address, length);
+                Log.Logger.Debug("ReadByteArray failed at address 0x{Address:X} (length {Length})", address, length);
             return buffer;
         }
 
@@ -67,7 +67,7 @@ namespace Archipelago.Core.Util
             }
             bool success = WriteProcessMemory(PlatformMemory.PlatformMemory.CurrentHandle(), address, data, data.Length, out _);
             if (!success)
-                Log.Logger.Warning("WriteByteArray failed at address 0x{Address:X} (length {Length})", address, data.Length);
+                Log.Logger.Debug("WriteByteArray failed at address 0x{Address:X} (length {Length})", address, data.Length);
         }
 
         [StructLayout(LayoutKind.Sequential)]

@@ -97,7 +97,7 @@ namespace Archipelago.Core.Helpers
                 }
                 else
                 {
-                    Log.Warning("No existing ItemIndex found - creating new");
+                    Log.Debug("No existing ItemIndex found - creating new");
                     SavedItemIndex = 0;
                 }
             }

@@ -55,7 +55,7 @@ namespace Archipelago.Core.Helpers
                 }
                 else
                 {
-                    Log.Warning($"Could not remove location {location.Id} - {location.Name} because it was not found in the list, or was found multiple times.");
+                    Log.Debug($"Could not remove location {location.Id} - {location.Name} because it was not found in the list, or was found multiple times.");
                 }
             }
         }
@@ -220,7 +220,7 @@ namespace Archipelago.Core.Helpers
             }
             catch (Exception ex)
             {
-                Log.Error($"Error cancelling monitors: {ex.Message}");
+                Log.Debug($"Error cancelling monitors: {ex.Message}");
             }
         }
     }

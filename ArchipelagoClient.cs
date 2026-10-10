@@ -26,7 +26,7 @@ namespace Archipelago.Core
 {
     public class ArchipelagoClient : IDisposable
     {
-        private readonly Timer _gameClientPollTimer;
+        private System.Threading.Timer _gameClientPollTimer;
         private GameStateManager? _gameStateManager;
         private GPSStateManager? _gpsStateManager;
 
@@ -93,6 +93,11 @@ namespace Archipelago.Core
 
         public ArchipelagoClient(IGameClient gameClient)
         {
+            if (gameClient.ProcId == 0)
+            {
+                Log.Warning("Could not find the game running.");
+                return;
+            }
             if (gameClient.ProcId != 0 && ElevationHelper.RequiresElevation(gameClient.ProcId))
             {
                 Log.Warning("Process {ProcessId} requires elevated privileges. Memory operations will fail without administrator access.", gameClient.ProcId);
@@ -104,12 +109,13 @@ namespace Archipelago.Core
             PlatformMemory.CurrentProcId = gameClient.ProcId;
             AppDomain.CurrentDomain.ProcessExit += async (sender, e) => await SaveGameStateAsync();
             _gameClient = gameClient;
-            _gameClientPollTimer = new Timer(PeriodicGameClientConnectionCheck, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+            _gameClientPollTimer = new System.Threading.Timer(PeriodicGameClientConnectionCheck, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
             NativeLibraryLoader.Initialize();
         }
         public async Task SaveGameStateAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken = Helpers.Helpers.CombineTokens(cancellationToken);
+            if (!IsConnected || !IsLoggedIn || CurrentSession == null || ItemManager == null) return;
 
             if (_gameStateManager == null)
             {
@@ -165,6 +171,7 @@ namespace Archipelago.Core
             if (!isConnected)
             {
                 Log.Warning("Connection to game lost, disconnecting from Archipelago");
+                _gameClientPollTimer?.Change(Timeout.Infinite, Timeout.Infinite);
                 GameDisconnected?.Invoke(this, EventArgs.Empty);
                 Disconnect();
             }
@@ -197,6 +204,7 @@ namespace Archipelago.Core
                 Seed = roomInfo.SeedName;
                 GameName = gameName;
 
+                CurrentSession.Socket.ErrorReceived += Socket_SocketError;
                 CurrentSession.Socket.SocketClosed += Socket_SocketClosed;
                 CurrentSession.MessageLog.OnMessageReceived += HandleMessageReceived;
                 CurrentSession.Socket.SendPacket(new SetNotifyPacket() { Keys = new[] { "ItemIndex" } });
@@ -221,6 +229,13 @@ namespace Archipelago.Core
             }
         }
 
+        private void Socket_SocketError(Exception e, string reason)
+        {
+            Log.Error($"Connection Error: {reason}");
+            Log.Debug($"{e}");
+            Disconnect();
+        }
+
         private void Socket_SocketClosed(string reason)
         {
             Log.Warning($"Connection Closed: {reason}");
@@ -229,23 +244,35 @@ namespace Archipelago.Core
 
         public void Disconnect()
         {
+            bool wasConnected = false;
             if (CurrentSession != null)
             {
                 Log.Information($"Disconnecting...");
-                CurrentSession.Socket.DisconnectAsync();
-                DisconnectHandlers();
+                try
+                {
+                    CurrentSession.Socket.DisconnectAsync();
+                    DisconnectHandlers();
+                }
+                catch (Exception ex)
+                {
+                    Log.Logger.Error($"Error trying to disconnect current session.\r\n{ex.ToString}");
+                }
                 LocationManager?.CancelMonitors();
                 ItemManager?.StopReceiving();
                 _gpsStateManager?.Dispose();
                 _gpsStateManager = null;
                 _gameStateManager = null;
                 CurrentSession = null;
+                wasConnected = true;
             }
             IsConnected = false;
             IsLoggedIn = false;
             Disconnected?.Invoke(this, new ConnectionChangedEventArgs(false));
             PlatformMemory.CurrentProcId = 0;
-            Log.Information($"Disconnected");
+            if (wasConnected)
+            {
+                Log.Information($"Disconnected");
+            }
         }
         private void DisconnectHandlers()
         {
@@ -270,7 +297,7 @@ namespace Archipelago.Core
             Log.Verbose($"Login Result: {(loginResult.Successful ? "Success" : "Failed")}");
             if (loginResult.Successful)
             {
-                Log.Information($"Connected as Player: {playerName} playing {GameName}");
+                Log.Verbose($"Connected as Player: {playerName} playing {GameName}");
             }
             else
             {
@@ -279,7 +306,7 @@ namespace Archipelago.Core
             }
             var currentSlot = CurrentSession.ConnectionInfo.Slot;
             var slotData = await CurrentSession.DataStorage.GetSlotDataAsync(currentSlot);
-            Log.Information("Loading Options.");
+            Log.Verbose("Loading Options.");
             if (slotData.TryGetValue("options", out object? optionData))
             {
                 if (optionData != null)
@@ -423,6 +450,7 @@ namespace Archipelago.Core
             {
                 Disconnect();
             }
+            _gameClientPollTimer?.Change(Timeout.Infinite, Timeout.Infinite);
             _gameClientPollTimer?.Dispose();
             _gpsStateManager?.Dispose();
             OverlayService?.Dispose();

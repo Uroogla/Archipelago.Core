@@ -65,7 +65,7 @@ namespace Archipelago.Core.Util.Duckstation
                 // Convert buffer to pointer
                 IntPtr ramBaseAddress = (IntPtr)BitConverter.ToInt64(buffer, 0);
 
-                Log.Logger.Information($"Found Duckstation RAM at 0x{ramBaseAddress:X}");
+                Log.Logger.Debug($"Found Duckstation RAM at 0x{ramBaseAddress:X}");
                 return ramBaseAddress;
             }
             finally
